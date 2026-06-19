@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card-background: #09090b;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: #09090b;
+  color: #fafafa;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Selection */
+::selection {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Beveled borders matching flask.do */
+.element-border {
+  border: 0.5px solid rgb(63, 63, 63);
+  border-top: 0.5px solid rgb(81, 81, 81);
+}
+
+.inverted-element-border {
+  border: 0.5px solid rgb(63, 63, 63);
+  border-top: 0.5px solid #09090B;
+}
+
+/* Custom WebRTC file transfer scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Glowing Button System from flask.do */
+.button-primary {
+  position: relative;
+  border-radius: 9999px;
+  border: 0.5px solid rgba(42,42,42,1);
+  border-top: 0.5px solid rgba(59,59,59,1);
+  background: linear-gradient(to top,#cfdef6 20%,#fafafa 80%)!important;
+  color: #09090b!important;
+  transition: all 0.2s ease;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.button-primary > * {
+  position: relative;
+  z-index: 1;
+}
+
+.button-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(50% 30% at 50% 112.3%, #d15dff, #d15dff00),
+              radial-gradient(60% 51.9% at 50% 110%, #f78264, #f7826400),
+              radial-gradient(89% 60% at 50% 95%, #efd7a4, #efd7a400),
+              #fafafa;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.button-primary:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.button-primary:hover:not(:disabled) {
+  color: #1f2937!important;
+  box-shadow: 0 4px 20px -5px rgba(239, 215, 164, 0.25);
+}
+
+.button-primary:active:not(:disabled) {
+  border-top: 1px solid transparent;
+  opacity: 0.95;
+  transform: translateY(2px);
+}
+
+.button-secondary {
+  position: relative;
+  border-radius: 9999px;
+  border: 0.5px solid rgba(42,42,42,1);
+  border-top: 0.5px solid rgba(59,59,59,1);
+  background: #202020!important;
+  color: #ffffffb3!important;
+  transition: all 0.2s ease;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.button-secondary > * {
+  position: relative;
+  z-index: 1;
+}
+
+.button-secondary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(50% 30% at 50% 112.3%, #d15dff4d, #d15dff00),
+              radial-gradient(60% 51.9% at 50% 110%, #f782644d, #f7826400),
+              radial-gradient(89% 60% at 50% 95%, #efd7a44d, #efd7a400),
+              #202020;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.button-secondary:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.button-secondary:hover:not(:disabled) {
+  color: #fffffff2!important;
+  background: #252525!important;
+}
+
+.button-secondary:active:not(:disabled) {
+  border-top: 1px solid transparent;
+  opacity: 0.95;
+  transform: translateY(2px);
+}
+
+/* Ambient glow nodes background */
+.ambient-glow {
+  filter: blur(120px) saturate(1.2);
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+  will-change: filter, transform;
+  backface-visibility: hidden;
+}

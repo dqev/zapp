@@ -1,0 +1,13 @@
+{
+  "name": "zapp-signaling-server",
+  "version": "1.0.0",
+  "description": "WebSocket signaling server for Zapp P2P",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

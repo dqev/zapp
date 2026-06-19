@@ -1,0 +1,14 @@
+{
+  "name": "zapp-root",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root orchestrator for Zapp P2P file sharing",
+  "scripts": {
+    "postinstall": "npm install --prefix signaling && npm install --prefix frontend",
+    "dev": "concurrently -n \"server,frontend\" -c \"magenta,cyan\" \"npm run dev --prefix signaling\" \"npm run dev --prefix frontend\"",
+    "build": "npm run build --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
