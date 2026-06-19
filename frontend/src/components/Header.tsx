@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { FlashSlash2 } from 'reicon-react';
 
 export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -35,9 +36,10 @@ export function Header() {
           <div className="flex items-center">
             <div 
               onClick={triggerReset}
-              className="cursor-pointer flex items-center"
+              className="cursor-pointer flex items-center gap-2"
             >
-              <span className="font-medium text-2xl tracking-tight text-white font-serif lowercase">zapp</span>
+              <FlashSlash2 weight="Filled" className="h-6 w-6 text-white shrink-0" />
+              <span className="font-medium text-2xl tracking-tight text-white font-serif">Zapp</span>
             </div>
           </div>
  
