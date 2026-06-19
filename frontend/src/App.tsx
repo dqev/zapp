@@ -139,7 +139,7 @@ function App() {
         
         {view === 'docs' ? (
           <div className="w-full pt-28 pb-20">
-            <Docs setView={setView} />
+            <Docs />
           </div>
         ) : (
           <>

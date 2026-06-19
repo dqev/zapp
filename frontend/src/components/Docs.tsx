@@ -5,11 +5,7 @@ import {
   HelpCircle, InfoCircle 
 } from 'reicon-react';
 
-interface DocsProps {
-  setView: (view: 'home' | 'docs') => void;
-}
-
-export function Docs({ setView }: DocsProps) {
+export function Docs() {
   const [activeSection, setActiveSection] = useState('introduction');
 
   const sections = [
