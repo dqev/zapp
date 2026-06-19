@@ -44,7 +44,7 @@ export function Header() {
           {/* Right Navigation CTAs */}
           <div className="flex items-center gap-1">
             <a 
-              href="https://github.com"
+              href="https://github.com/dqev/zapp"
               target="_blank"
               rel="noopener noreferrer"
               className="button-primary py-1.5 px-4 text-xs font-semibold whitespace-nowrap inline-flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer"
