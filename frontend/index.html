@@ -72,6 +72,39 @@
   }
   </script>
 
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Why is my P2P connection stuck on 'connecting...'?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "This occurs when strict NAT configurations or firewalls block direct peer-to-peer UDP traffic. While WebRTC bypasses most residential routers, some enterprise or university networks block UDP connections entirely, preventing direct tunnel establishment."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I close the browser tab during a file transfer?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Zapp streams files directly from the sender's sandboxed memory to the receiver. Closing the tab, navigating away, or putting your device to sleep terminates the WebRTC data channel and aborts the transfer."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What file size limits or formats does Zapp support?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Zapp supports files of unlimited size (including gigabyte-scale directories, videos, and archives) and all file formats. It uses client-side memory chunking to feed slices dynamically without memory exhaustion."
+        }
+      }
+    ]
+  }
+  </script>
+
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

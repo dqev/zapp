@@ -12,19 +12,19 @@ export function Hero({ scrollToWorkspace }: HeroProps) {
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-        className="font-serif font-medium tracking-tight text-3xl sm:text-4xl md:text-[54px] text-text-primary text-center leading-[1.1] max-w-3xl"
+        className="font-serif font-medium tracking-tight text-3xl sm:text-4xl md:text-[54px] text-text-primary text-center leading-[1.35] max-w-3xl"
       >
-        The fastest way to stream files, <br />
-        without intermediate servers
+        Direct Peer-to-Peer File Transfer <br />
+        Without Server Uploads
       </motion.h1>
 
       <motion.p 
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-        className="text-sm md:text-[20px] text-text-secondary/70 font-normal leading-relaxed mt-6 max-w-xl text-center"
+        className="text-sm md:text-[16px] text-text-secondary/70 font-normal leading-relaxed mt-6 max-w-2xl text-center"
       >
-        Stream large files, images, or archives directly in memory. Zapp automatically establishes a secure tunnel and streams everything end-to-end.
+        Zapp is a secure, browser-native P2P file sharing tool that streams large files, images, or folders directly between devices. Send files of any size online with no size limits, no server storage, and end-to-end encryption.
       </motion.p>
 
       {/* Hero CTAs */}
