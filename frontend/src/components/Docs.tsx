@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  ArrowLeft, BookOpen, Cpu, Shield, 
+  BookOpen, Cpu, Shield, 
   HelpCircle, InfoCircle 
 } from 'reicon-react';
 
@@ -59,10 +59,6 @@ export function Docs({ setView }: DocsProps) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [activeSection]);
 
-  const handleBack = () => {
-    window.location.hash = '';
-    setView('home');
-  };
 
   return (
     <div className="w-full max-w-[1200px] mx-auto px-6 md:px-10 flex flex-col md:flex-row gap-12 relative pt-8">
