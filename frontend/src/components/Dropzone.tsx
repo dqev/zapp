@@ -306,17 +306,17 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
                     className="button-primary group inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-full transition-all duration-200 active:scale-95"
                   >
                     <span>Upload</span>
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${menuOpen ? '' : 'rotate-180'}`} />
                   </button>
 
                   <AnimatePresence>
                     {menuOpen && (
                       <motion.div
-                        initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                        initial={{ opacity: 0, y: 6, scale: 0.96 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                        exit={{ opacity: 0, y: 6, scale: 0.96 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute left-1/2 -translate-x-1/2 mt-2 w-44 z-30 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 overflow-hidden p-1"
+                        className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-44 z-30 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 overflow-hidden p-1"
                       >
                         <button
                           type="button"
