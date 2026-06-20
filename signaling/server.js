@@ -1,30 +1,57 @@
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
-const port = process.env.PORT || 7860;
+const port    = process.env.PORT     || 7860;
+const MAX_PEERS = parseInt(process.env.MAX_PEERS || '10', 10); // max receivers per broadcast room
 
-// Create an HTTP server to handle health check probes from Hugging Face / Render / Railway
+// Create an HTTP server for health checks
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'healthy', timestamp: new Date().toISOString() }));
+    res.end(JSON.stringify({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      rooms: rooms.size,
+      maxPeers: MAX_PEERS
+    }));
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
   }
 });
 
-// Attach the WebSocket server to the HTTP server
 const wss = new WebSocketServer({ server });
 
-// Keep track of rooms: roomId -> Map(peerId -> websocket)
+// rooms: roomId -> { host: peerId | null, peers: Map(peerId -> ws) }
 const rooms = new Map();
+
+function getRoomInfo(roomId) {
+  if (!rooms.has(roomId)) {
+    rooms.set(roomId, { host: null, peers: new Map() });
+  }
+  return rooms.get(roomId);
+}
+
+function broadcastToRoom(room, message, excludePeerId = null) {
+  const json = JSON.stringify(message);
+  room.peers.forEach((ws, id) => {
+    if (id !== excludePeerId && ws.readyState === ws.OPEN) {
+      ws.send(json);
+    }
+  });
+}
+
+function safeSend(ws, message) {
+  if (ws && ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+}
 
 wss.on('connection', (ws) => {
   let currentRoomId = null;
   let currentPeerId = null;
 
-  console.log('New client connected');
+  console.log('[WS] New client connected');
 
   ws.on('message', (message) => {
     try {
@@ -36,31 +63,55 @@ wss.on('connection', (ws) => {
           currentRoomId = roomId;
           currentPeerId = peerId;
 
-          if (!rooms.has(roomId)) {
-            rooms.set(roomId, new Map());
+          const room = getRoomInfo(roomId);
+
+          // Count only active connections (exclude the joining ws itself)
+          const activePeers = Array.from(room.peers.values())
+            .filter(sock => sock !== ws && sock.readyState === ws.OPEN);
+
+          if (activePeers.length >= MAX_PEERS) {
+            safeSend(ws, {
+              type: 'error',
+              code: 'ROOM_FULL',
+              message: `Room is full (max ${MAX_PEERS} peers)`
+            });
+            console.warn(`[Room ${roomId}] FULL — rejecting peer ${peerId}`);
+            break;
           }
 
-          const roomPeers = rooms.get(roomId);
-          
-          // Save this peer's socket
-          roomPeers.set(peerId, ws);
+          // Register peer
+          room.peers.set(peerId, ws);
 
-          console.log(`Peer ${peerId} joined room ${roomId}. Total peers in room: ${roomPeers.size}`);
+          // First peer becomes the host (broadcaster)
+          const isHost = room.host === null;
+          if (isHost) {
+            room.host = peerId;
+            console.log(`[Room ${roomId}] Host set: ${peerId}`);
+          }
 
-          // Send back the list of existing peers in the room (excluding current peer)
-          const existingPeers = Array.from(roomPeers.keys()).filter(id => id !== peerId);
-          ws.send(JSON.stringify({
+          const existingPeers = Array.from(room.peers.keys()).filter(id => id !== peerId);
+          console.log(`[Room ${roomId}] ${peerId} joined. Peers: ${room.peers.size}. isHost: ${isHost}`);
+
+          // Tell the joiner: who they are and who is already here
+          safeSend(ws, {
             type: 'joined',
             roomId,
-            peers: existingPeers
-          }));
+            peerId,
+            isHost,
+            hostId: room.host,
+            peers: existingPeers   // For host: list of existing receivers. For receiver: [hostId]
+          });
 
-          // Notify existing peers that a new peer has joined
-          roomPeers.forEach((clientSocket, clientId) => {
-            if (clientId !== peerId && clientSocket.readyState === ws.OPEN) {
-              clientSocket.send(JSON.stringify({
+          // Notify existing peers that a new peer joined
+          // Include whether the NEW peer is the host (so receivers know who the host is)
+          room.peers.forEach((clientWs, clientId) => {
+            if (clientId !== peerId && clientWs.readyState === ws.OPEN) {
+              clientWs.send(JSON.stringify({
                 type: 'peer-joined',
-                peerId
+                peerId,
+                isHost,
+                hostId: room.host,
+                peerCount: room.peers.size
               }));
             }
           });
@@ -69,66 +120,69 @@ wss.on('connection', (ws) => {
 
         case 'signal': {
           const { roomId, peerId, targetId, signalData } = data;
-          const roomPeers = rooms.get(roomId);
+          const room = rooms.get(roomId);
+          if (!room) break;
 
-          if (roomPeers && roomPeers.has(targetId)) {
-            const targetSocket = roomPeers.get(targetId);
-            if (targetSocket.readyState === ws.OPEN) {
-              targetSocket.send(JSON.stringify({
-                type: 'signal',
-                peerId, // Who sent the signal
-                signalData
-              }));
-            }
+          const targetWs = room.peers.get(targetId);
+          if (targetWs && targetWs.readyState === targetWs.OPEN) {
+            targetWs.send(JSON.stringify({
+              type: 'signal',
+              peerId,      // Who sent the signal
+              signalData
+            }));
           }
           break;
         }
 
         case 'ping': {
-          ws.send(JSON.stringify({ type: 'pong' }));
+          safeSend(ws, { type: 'pong' });
           break;
         }
 
         default:
-          console.warn('Unknown message type:', data.type);
+          console.warn('[WS] Unknown message type:', data.type);
       }
     } catch (error) {
-      console.error('Error handling message:', error);
+      console.error('[WS] Error handling message:', error);
     }
   });
 
   ws.on('close', () => {
-    console.log(`Client disconnected: peer ${currentPeerId} from room ${currentRoomId}`);
-    if (currentRoomId && currentPeerId) {
-      const roomPeers = rooms.get(currentRoomId);
-      if (roomPeers) {
-        roomPeers.delete(currentPeerId);
+    console.log(`[WS] Disconnected: peer ${currentPeerId} from room ${currentRoomId}`);
+    if (!currentRoomId || !currentPeerId) return;
 
-        // Notify remaining peers that this peer left
-        roomPeers.forEach((clientSocket, clientId) => {
-          if (clientSocket.readyState === ws.OPEN) {
-            clientSocket.send(JSON.stringify({
-              type: 'peer-left',
-              peerId: currentPeerId
-            }));
-          }
-        });
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
 
-        // Clean up empty rooms
-        if (roomPeers.size === 0) {
-          rooms.delete(currentRoomId);
-          console.log(`Cleaned up empty room ${currentRoomId}`);
-        }
-      }
+    room.peers.delete(currentPeerId);
+
+    const wasHost = room.host === currentPeerId;
+    if (wasHost) {
+      // Host left — the session is over for everyone
+      room.host = null;
+      broadcastToRoom(room, { type: 'host-left', peerId: currentPeerId });
+      console.log(`[Room ${currentRoomId}] Host left — notifying all receivers`);
+    } else {
+      // Regular peer left — notify remaining peers (including host)
+      broadcastToRoom(room, {
+        type: 'peer-left',
+        peerId: currentPeerId,
+        peerCount: room.peers.size
+      });
+    }
+
+    // Clean up empty rooms
+    if (room.peers.size === 0) {
+      rooms.delete(currentRoomId);
+      console.log(`[Room ${currentRoomId}] Empty — cleaned up`);
     }
   });
 
   ws.on('error', (err) => {
-    console.error('Socket error:', err);
+    console.error('[WS] Socket error:', err);
   });
 });
 
-// Start the HTTP & WebSocket server
 server.listen(port, () => {
-  console.log(`Zapp signaling server is running on port ${port}`);
+  console.log(`[Zapp] Signaling server running on port ${port} (max ${MAX_PEERS} peers/room)`);
 });

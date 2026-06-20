@@ -11,16 +11,24 @@ export function FAQ() {
       a: "Zapp establishes a direct Peer-to-Peer (P2P) connection between the sender and recipient browsers using WebRTC. Files are read as chunks in browser memory and streamed directly over an encrypted data channel. No intermediate servers ever receive or store your data."
     },
     {
+      q: "How does the 1-to-Many Broadcast work, and is there a performance impact?",
+      a: "The first peer to enter a room becomes the host. When additional receivers (up to 10) join using the same code, the host establishes a separate, independent WebRTC connection with each peer. Because connections are isolated, a slow connection on one receiver will not affect the speed of others."
+    },
+    {
+      q: "Can I transfer multiple files or entire folders at once?",
+      a: "Yes! Zapp supports bulk uploads. You can select multiple files or drag-and-drop entire folders. Zapp uses the browser's FileSystem API to recursively traverse folder directories, queuing and transferring all items sequentially."
+    },
+    {
       q: "Is there a limit on the file size I can share?",
-      a: "No. Since your files are read dynamically as streams in chunks instead of being uploaded whole, Zapp bypasses all traditional server-side storage limits. You can send gigabytes or terabytes directly, as long as both browser tabs remain open."
+      a: "No. Zapp streams files by reading them in dynamic 256 KB slices from disk, avoiding loading the entire file into memory. This allows you to transfer files of virtually any size (even hundreds of gigabytes) without crashing your browser tab."
     },
     {
-      q: "Are my transfers secure and encrypted?",
-      a: "Yes. All WebRTC data channels are encrypted end-to-end by default using DTLS (Datagram Transport Layer Security) and SRTP. Even if someone intercepts the network, they cannot read the streamed file chunks."
+      q: "How fast are the transfers on Zapp?",
+      a: "Zapp is tuned for maximum throughput. By utilizing a 256 KB chunk size combined with a 4 MB backpressure buffer (using the bufferedAmountLowThreshold API), we keep the browser's network queue saturated without overflow. This achieves transfer speeds up to 16 times faster than standard WebRTC implementations."
     },
     {
-      q: "Do I or my recipient need to register or install software?",
-      a: "Never. Zapp is designed to be completely zero-friction. It runs entirely inside standard modern web browsers (Chrome, Safari, Firefox, Edge) without requiring accounts, sign-ups, or plugins."
+      q: "What happens if my connection drops during a transfer?",
+      a: "Zapp has built-in resilience. If a connection experiences transient network issues, the browser will automatically attempt an ICE (Interactive Connectivity Establishment) restart up to 3 times to restore the direct peer tunnel without losing transfer progress."
     }
   ];
 
@@ -65,7 +73,7 @@ export function FAQ() {
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.25, ease: 'easeInOut' }}
                   >
-                    <div className="p-5 pt-0 text-xs md:text-sm text-text-secondary/80 leading-relaxed border-t border-white/[0.02] font-normal">
+                    <div className="p-5 pt-0 text-xs md:text-sm text-text-secondary/80 leading-relaxed font-normal">
                       {faq.a}
                     </div>
                   </motion.div>

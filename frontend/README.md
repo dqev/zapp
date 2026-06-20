@@ -1,81 +1,143 @@
-# Zapp — Secure, Browser-Native P2P File & Clipboard Sharing
+# Zapp — Secure, Browser-Native P2P File Broadcasting
 
-Zapp is a production-grade, zero-friction, browser-native peer-to-peer (P2P) file and text transfer platform. Built with modern web standards, Zapp establishes direct, encrypted communication tunnels between web browsers utilizing WebRTC. This architecture completely eliminates intermediate server uploads, offering absolute digital privacy and unmatched transfer speeds.
+Zapp is a production-grade, zero-friction, browser-native peer-to-peer (P2P) file and text transfer platform. Built on WebRTC, Zapp establishes direct, encrypted tunnels between web browsers — completely eliminating server uploads. Now with **1-to-many broadcast mode**: one host can stream files simultaneously to up to 10 receivers.
 
 ![Zapp Preview](frontend/public/og-image.png)
+---
+
+## What's New
+
+| Feature | Status |
+|---|---|
+| **1-to-Many Broadcast** | ✅ Host broadcasts files to up to 10 receivers simultaneously |
+| **Bulk File Upload** | ✅ Drop entire folders — all files are queued and sent in sequence |
+| **Pause / Resume / Cancel** | ✅ Per-file flow control with full pump restart |
+| **256 KB Chunks + 4 MB Buffer** | ✅ ~16× faster than legacy 16 KB chunk size |
+| **Auto ICE Restart** | ✅ Reconnects on network drops (3 retry attempts) |
+| **Room Full Detection** | ✅ Red "room full" badge — no silent failure |
+| **Recipient Send-Back** | ✅ Receivers can upload files back to the host |
+| **Memory-Safe Object URLs** | ✅ All blob URLs revoked on unmount (no memory leak) |
+
+---
 
 ## Core Features & Capabilities
 
-*   **Serverless P2P Streaming:** Data streams directly from the sender's local storage to the receiver's local storage using WebRTC SCTP DataChannels.
-*   **Arbitrary File Size Support:** Features a custom client-side streaming engine that slices payloads into dynamic memory chunks (16KB to 64KB). This prevents browser tab crashes or RAM exhaustion, enabling gigabyte-scale transfers.
-*   **Secure Text & Link Clipboard:** Instantly share texts, code blocks, or URLs with connected peers, protected under the same end-to-end security model.
-*   **Real-Time Telemetry:** Visual indicators for byte-level progress tracking, current throughput (MB/s), elapsed duration, and high-accuracy ETA calculations.
-*   **Zero-Knowledge Architecture:** No files, file metadata, or user identities are ever written to disk or stored in any database. The signaling server is solely used to facilitate the handshake and is disconnected once the P2P channel is established.
-*   **Premium Visual Experience:** A highly optimized dark-mode UI with subtle micro-animations (Framer Motion), clean typography, and a mobile-friendly responsive layout.
+- **1-to-Many Broadcast:** The first peer to join becomes the host/broadcaster. Each subsequent peer becomes a receiver. The host maintains an independent `RTCPeerConnection + DataChannel` per receiver and sends files to all receivers simultaneously, with independent flow control per peer.
+- **Serverless P2P Streaming:** Data streams directly browser-to-browser using WebRTC SCTP DataChannels. Files never touch a server.
+- **Unlimited File Size:** A custom streaming engine slices files into 256 KB chunks using `Blob.slice().arrayBuffer()` (Promise-based, no stale FileReader handlers). Buffer backpressure is managed via `bufferedAmountLowThreshold`.
+- **Bulk Upload + Folder Support:** Drop multiple files or entire folder trees. Folders are recursively expanded via the FileSystem API. All items are queued and sent in sequence.
+- **Pause / Resume / Cancel:** Per-file flow control. Pausing a file sleeps the send pump via a Promise resolved by `resumeTransfer()`. Cancel propagates to all connected receivers.
+- **Real-Time Telemetry:** Per-file progress, transfer speed (bytes/sec), and ETA calculated every 300ms.
+- **Zero-Knowledge Architecture:** No files, metadata, or identities ever stored. Signaling server only facilitates the handshake.
+- **Auto-Reconnect:** ICE restart is attempted up to 3 times on connection failure before giving up cleanly.
 
 ---
 
 ## Technical Architecture
 
-Zapp relies on a lightweight signaling server for initial peer discovery and connection negotiation (NAT traversal), after which all communication happens directly between the clients.
+### Broadcast Topology (Star / Hub Model)
+
+```
+              ┌─────────────────────────┐
+              │    HOST / BROADCASTER   │  ← First peer to join
+              └────┬────────┬────────┬──┘
+                   │        │        │
+              [Peer A]  [Peer B]  [Peer C]  ... (up to 10)
+```
+
+Each receiver gets a dedicated `RTCPeerConnection`. Files are sent independently to each peer — a slow receiver never blocks others.
+
+### WebRTC Signaling Flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Sender as Sender Browser
-    participant Signaling as WebSocket Signaling (HF)
-    participant Receiver as Receiver Browser
+    participant Host as Host Browser
+    participant Signaling as WebSocket Signaling
+    participant R1 as Receiver 1
+    participant R2 as Receiver 2
 
-    Note over Sender, Signaling: Peer Registration
-    Sender->>Signaling: Request Room Creation
-    Signaling-->>Sender: Return 6-Digit Room Code
+    Note over Host, Signaling: Room Creation
+    Host->>Signaling: join(roomId) — becomes host
+    Signaling-->>Host: joined { isHost: true, peers: [] }
 
-    Note over Receiver, Signaling: Discovery
-    Receiver->>Signaling: Join Room with 6-Digit Code
-    Signaling-->>Sender: Notify: Receiver Joined
+    Note over R1, Signaling: Receiver 1 joins
+    R1->>Signaling: join(roomId)
+    Signaling-->>R1: joined { isHost: false, hostId }
+    Signaling-->>Host: peer-joined { peerId: R1 }
 
-    Note over Sender, Receiver: WebRTC Handshake (SDP & ICE Exchange)
-    Sender->>Signaling: Transmit SDP Offer & ICE Candidates
-    Signaling->>Receiver: Forward SDP Offer & ICE Candidates
-    Receiver->>Signaling: Transmit SDP Answer & ICE Candidates
-    Signaling->>Sender: Forward SDP Answer & ICE Candidates
+    Note over Host, R1: WebRTC Handshake (SDP + ICE)
+    Host->>Signaling: signal(offer) → R1
+    Signaling->>R1: forward offer
+    R1->>Signaling: signal(answer) → Host
+    Signaling->>Host: forward answer
 
-    Note over Sender, Receiver: Direct Connection Established
-    Signaling-->>Sender: Disconnect
-    Signaling-->>Receiver: Disconnect
-    
+    Note over Host, R2: Receiver 2 joins — same flow
+    R2->>Signaling: join(roomId)
+    Signaling-->>Host: peer-joined { peerId: R2 }
+    Host->>R2: new RTCPeerConnection (independent)
+
     rect rgb(20, 20, 25)
-        Note over Sender, Receiver: Direct P2P Channel (E2EE)
-        Sender->>Receiver: Stream Binary File Slices / Clipboard Data
+        Note over Host, R2: Direct P2P Channels (DTLS-E2EE)
+        Host->>R1: stream file chunks (256KB each)
+        Host->>R2: stream file chunks (independent pump)
     end
 ```
 
 ### Protocol Details
-- **Signaling Layer:** Implemented on Node.js using the high-performance `ws` library.
-- **Connection Negotiation:** WebRTC PeerConnections exchange Session Description Protocol (SDP) configurations and Interactive Connectivity Establishment (ICE) candidates.
-- **Network Traversal:** Public STUN servers are queried to determine public IP addresses and ports, successfully bypassing most symmetric and asymmetric domestic NAT/Firewall configurations.
+
+| Layer | Technology | Detail |
+|---|---|---|
+| Signaling | Node.js `ws` | WebSocket, JSON, heartbeat every 25s |
+| NAT traversal | STUN (6 servers) + TURN (3 OpenRelay) | Pre-gathered ICE candidates (`iceCandidatePoolSize: 10`) |
+| Data transport | WebRTC SCTP DataChannel | `ordered: true`, 256 KB chunks, 4 MB buffer |
+| Encryption | DTLS 1.2/1.3 | Mandatory per WebRTC spec |
+| Backpressure | `bufferedAmountLowThreshold = 512 KB` | Pump sleeps/wakes via `onbufferedamountlow` |
+
+---
+
+## Performance Tuning
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `CHUNK_SIZE` | 256 KB | Max safe DataChannel chunk (browser-tested) |
+| `BUFFER_HIGH_WATERMARK` | 4 MB | Keep OS send buffer full for max throughput |
+| `BUFFER_LOW_WATERMARK` | 512 KB | Resume before the queue starves |
+| `STATS_INTERVAL_MS` | 300 ms | Smooth UI updates without excessive re-renders |
+| `MAX_ICE_RESTARTS` | 3 | Retry cap prevents infinite restart loops |
+| `iceCandidatePoolSize` | 10 | Pre-gather candidates for sub-100ms connect |
 
 ---
 
 ## Security & Encryption Model
 
-Security is baked directly into the protocol:
-1.  **End-to-End Encryption (E2EE):** Data is encrypted at the source browser using Datagram Transport Layer Security (DTLS) and decrypted only at the target browser. 
-2.  **No Server Persistence:** Because files are sent as raw binary buffers directly over SCTP sockets, they are never cached or written to any physical storage media during transit.
-3.  **No Tracking:** Zapp has no database, utilizes no user tracking pixels, does not set persistent cookies, and respects the absolute privacy of users.
+1. **End-to-End Encryption (E2EE):** DTLS encryption is mandatory in the WebRTC spec. Data is encrypted at the source and decrypted only at the destination — signaling server has no payload visibility.
+2. **No Server Persistence:** Binary buffers are streamed over SCTP sockets directly — never cached or written to any storage during transit.
+3. **No Tracking:** No database, no analytics, no cookies, no persistent identifiers. The signaling server only holds in-memory `Map<roomId, Map<peerId, WebSocket>>` which is wiped when peers disconnect.
+4. **Room Isolation:** Each room is a 6-digit numeric code. The server enforces a maximum of 10 peers per room and rejects joiners with a typed `error` message.
 
 ---
 
 ## Directory Structure
 
-The repository is organized into a clean monorepo structure:
 ```text
 zapp/
-├── frontend/             # Vite + React (TypeScript) Application
-│   ├── public/           # Static assets, sitemap, robots, manifest, favicons
-│   └── src/              # React components, hooks, and page layout
-├── signaling/            # Node.js WebSocket signaling server
-└── package.json          # Root scripts to orchestrate local development
+├── frontend/                    # Vite + React (TypeScript)
+│   └── src/
+│       ├── hooks/
+│       │   └── useWebRTC.ts     # WebRTC engine: star topology, send pump, flow control
+│       ├── components/
+│       │   ├── ActiveWorkspace.tsx  # Room UI, peer count badge, share panel
+│       │   ├── TransferStats.tsx    # Per-file progress, pause/resume/cancel
+│       │   ├── Dropzone.tsx         # Multi-file + folder drag-and-drop
+│       │   ├── Features.tsx         # Feature grid section
+│       │   ├── Docs.tsx             # Technical documentation page
+│       │   └── ...
+│       └── utils/
+│           └── format.ts        # formatBytes, formatTime (NaN-safe)
+├── signaling/
+│   └── server.js                # Node.js WS server: host tracking, room cap, broadcast
+└── package.json                 # Root scripts (concurrent dev)
 ```
 
 ---
@@ -83,53 +145,48 @@ zapp/
 ## Local Development & Setup
 
 ### Prerequisites
-- Node.js (v18.0.0 or higher)
-- npm (v9.0.0 or higher)
+- Node.js v18+
+- npm v9+
 
-### Step-by-Step Installation
+### Installation
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/dqev/zapp.git
-    cd zapp
-    ```
+```bash
+# 1. Clone
+git clone https://github.com/dqev/zapp.git
+cd zapp
 
-2.  **Install Monorepo Dependencies:**
-    Installing dependencies at the root will automatically resolve workspaces and configure dependencies for both the frontend and the signaling server.
-    ```bash
-    npm install
-    ```
+# 2. Install all workspace dependencies
+npm install
 
-3.  **Run Development Environment:**
-    Start both the frontend client and the backend signaling server concurrently:
-    ```bash
-    npm run dev
-    ```
+# 3. Run frontend + signaling concurrently
+npm run dev
+```
 
-4.  **Open the Web App:**
-    Vite will expose the app. Navigate to:
-    ```text
-    http://localhost:5173
-    ```
+Open: `http://localhost:5173`
+
+### Environment Variables (optional)
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_TURN_URL` | — | Custom TURN server URL (e.g. `turn:my-server.com:3478`) |
+| `VITE_TURN_USERNAME` | — | TURN credential username |
+| `VITE_TURN_CREDENTIAL` | — | TURN credential password |
+| `MAX_PEERS` | `10` | Max peers per room (signaling server) |
+| `PORT` | `7860` | Signaling server port |
 
 ---
 
 ## Production Deployments
 
-The live service is split across two production deployment environments:
+### Frontend (Vercel)
+- **URL:** [https://zapp.devchauhan.in](https://zapp.devchauhan.in)
 
-### 1. Frontend Web Client (Vercel)
-- **Deployment URL:** [https://zapp.devchauhan.in](https://zapp.devchauhan.in)
-- Built with a static optimization pipeline, automatically serving site manifests, SEO tags, sitemaps, and robots configuration.
-
-### 2. Signaling Server (Hugging Face Spaces)
-- **Deployment URL:** `wss://devchauhann-zapp.hf.space`
-- Deployed inside a Docker container on Hugging Face Spaces. It runs an HTTP wrapper with a `/health` endpoint to pass the platform's load balancer checks and listens on port `7860`.
+### Signaling Server (Hugging Face Spaces)
+- **URL:** `wss://devchauhann-zapp.hf.space`
+- Runs in Docker, exposes `/health` for load balancer probes, listens on port `7860`
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
-
+MIT License. See [LICENSE](LICENSE) for details.

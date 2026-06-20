@@ -11,6 +11,7 @@ import { Features } from './components/Features';
 import { FAQ } from './components/FAQ';
 import { Docs } from './components/Docs';
 import { AnimatePresence, motion } from 'framer-motion';
+import { formatBytes } from './utils/format';
 
 function App() {
   const [roomId, setRoomId] = useState(() => {
@@ -22,7 +23,7 @@ function App() {
     return window.location.hash.substring(1) === 'docs' ? 'docs' : 'home';
   });
   
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [hasStartedSending, setHasStartedSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -43,7 +44,7 @@ function App() {
         setRoomId(hash);
         if (!hash) {
           // Reset state if we navigated home
-          setPendingFile(null);
+          setPendingFiles([]);
           setHasStartedSending(false);
           setShowQR(false);
           setQrCodeUrl('');
@@ -59,37 +60,39 @@ function App() {
   // WebRTC initialization
   const {
     connectionState,
+    isHost,
+    peerCount,
+    connectedPeers,
     transferQueue,
-    sendFile,
+    sendFiles,
+    pauseTransfer,
+    resumeTransfer,
     cancelTransfer
   } = useWebRTC(roomId);
 
   const isConnected = connectionState === 'connected';
 
-  // Automatically start file transfer when connected
+  // Automatically start file transfer when connected (bulk)
   useEffect(() => {
-    if (isConnected && pendingFile && !hasStartedSending) {
+    if (isConnected && pendingFiles.length > 0 && !hasStartedSending) {
       setHasStartedSending(true);
-      sendFile(pendingFile);
+      sendFiles(pendingFiles);
     }
-  }, [isConnected, pendingFile, hasStartedSending, sendFile]);
+  }, [isConnected, pendingFiles, hasStartedSending, sendFiles]);
 
   // Generate QR code for the room URL
+  // BUG-9 fix: only depend on roomId, not shareUrl (which is always derived from it)
   const shareUrl = roomId ? `${window.location.origin}/#${roomId}` : '';
   useEffect(() => {
-    if (roomId && shareUrl) {
-      QRCode.toDataURL(shareUrl, {
-        margin: 1,
-        width: 256,
-        color: {
-          dark: '#09090b',
-          light: '#ffffff'
-        }
-      })
-        .then(url => setQrCodeUrl(url))
-        .catch(err => console.error(err));
-    }
-  }, [roomId, shareUrl]);
+    if (!roomId) return;
+    QRCode.toDataURL(`${window.location.origin}/#${roomId}`, {
+      margin: 1,
+      width: 256,
+      color: { dark: '#09090b', light: '#ffffff' }
+    })
+      .then(url => setQrCodeUrl(url))
+      .catch(err => console.error(err));
+  }, [roomId]);
 
   const copyToClipboard = () => {
     if (!shareUrl) return;
@@ -100,8 +103,8 @@ function App() {
 
   const handleFileSelected = (files: FileList) => {
     if (files.length === 0) return;
-    const file = files[0];
-    setPendingFile(file);
+    const fileArray = Array.from(files);
+    setPendingFiles(fileArray);
     
     // Generate a 6-digit numeric room ID code and set hash
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -119,6 +122,8 @@ function App() {
   };
 
   const handleReset = () => {
+    setPendingFiles([]);
+    setHasStartedSending(false);
     window.location.hash = '';
   };
 
@@ -162,7 +167,7 @@ function App() {
                             room-{roomId}
                           </span>
                           <span className="hidden sm:inline text-text-secondary/40 select-none">/</span>
-                          <span className="hidden sm:inline text-text-primary font-normal">{pendingFile ? 'sender' : 'recipient'}</span>
+                          <span className="hidden sm:inline text-text-primary font-normal">{isHost ? 'host' : (pendingFiles.length > 0 ? 'sender' : 'receiver')}</span>
                         </>
                       ) : (
                         <span className="text-text-primary font-normal">new connection</span>
@@ -173,11 +178,19 @@ function App() {
                       {roomId && (
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${
                           isConnected 
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : connectionState === 'failed'
+                            ? 'bg-red-500/10 text-red-400 border-red-500/20'
                             : 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
                         }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                          {isConnected ? 'connected' : 'connecting...'}
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            isConnected ? 'bg-emerald-400' : connectionState === 'failed' ? 'bg-red-400' : 'bg-amber-400'
+                          }`} />
+                          {isConnected
+                            ? peerCount > 1
+                              ? `${peerCount} connected`
+                              : 'connected'
+                            : connectionState === 'failed' ? 'room full' : 'connecting...'}
                         </span>
                       )}
                     </div>
@@ -218,8 +231,11 @@ function App() {
                         /* Active Room Workspace */
                         <ActiveWorkspace
                           roomId={roomId}
-                          pendingFile={pendingFile}
+                          pendingFiles={pendingFiles}
                           isConnected={isConnected}
+                          isHost={isHost}
+                          peerCount={peerCount}
+                          connectedPeers={connectedPeers}
                           shareUrl={shareUrl}
                           copied={copied}
                           copyToClipboard={copyToClipboard}
@@ -228,7 +244,11 @@ function App() {
                           qrCodeUrl={qrCodeUrl}
                           transferQueue={transferQueue}
                           cancelTransfer={cancelTransfer}
+                          pauseTransfer={pauseTransfer}
+                          resumeTransfer={resumeTransfer}
+                          sendFiles={sendFiles}
                           handleReset={handleReset}
+                          formatBytes={formatBytes}
                         />
                       )}
                     </AnimatePresence>
