@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { 
-  BookOpen, Cpu, Shield, 
+import {
+  BookOpen, Cpu, Shield,
   HelpCircle, InfoCircle, Users
 } from 'reicon-react';
 
@@ -9,12 +9,12 @@ export function Docs() {
   const [activeSection, setActiveSection] = useState('introduction');
 
   const sections = [
-    { id: 'introduction',  label: 'Overview',          icon: BookOpen   },
-    { id: 'broadcast',     label: '1-to-Many Broadcast', icon: Users    },
-    { id: 'protocol',      label: 'WebRTC Protocol',   icon: Cpu        },
-    { id: 'performance',   label: 'Performance',        icon: InfoCircle },
-    { id: 'security',      label: 'Security & Privacy', icon: Shield     },
-    { id: 'faq',           label: 'FAQ & Limits',       icon: HelpCircle },
+    { id: 'introduction', label: 'Overview', icon: BookOpen },
+    { id: 'broadcast', label: '1-to-Many Broadcast', icon: Users },
+    { id: 'protocol', label: 'WebRTC Protocol', icon: Cpu },
+    { id: 'performance', label: 'Performance', icon: InfoCircle },
+    { id: 'security', label: 'Security & Privacy', icon: Shield },
+    { id: 'faq', label: 'FAQ & Limits', icon: HelpCircle },
   ];
 
   const handleScrollTo = (id: string) => {
@@ -22,7 +22,7 @@ export function Docs() {
     const element = document.getElementById(id);
     if (element) {
       const offset = 100;
-      const bodyRect    = document.body.getBoundingClientRect().top;
+      const bodyRect = document.body.getBoundingClientRect().top;
       const elementRect = element.getBoundingClientRect().top;
       const offsetPosition = (elementRect - bodyRect) - offset;
       window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
@@ -59,9 +59,8 @@ export function Docs() {
                 <button
                   key={sec.id}
                   onClick={() => handleScrollTo(sec.id)}
-                  className={`flex items-center gap-2.5 py-1 text-xs font-medium transition-all duration-200 relative ${
-                    isActive ? 'text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'
-                  }`}
+                  className={`flex items-center gap-2.5 py-1 text-xs font-medium transition-all duration-200 relative ${isActive ? 'text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'
+                    }`}
                 >
                   {isActive && (
                     <motion.div
@@ -98,10 +97,10 @@ export function Docs() {
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
             {[
-              { value: '0%',   label: 'Server Storage'   },
-              { value: 'E2EE', label: 'Encrypted'        },
-              { value: '10',   label: 'Max Receivers'    },
-              { value: '∞',    label: 'File Size'        },
+              { value: '0%', label: 'Server Storage' },
+              { value: 'E2EE', label: 'Encrypted' },
+              { value: '10', label: 'Max Receivers' },
+              { value: '∞', label: 'File Size' },
             ].map(s => (
               <div key={s.label} className="border border-white/[0.06] bg-white/[0.01] p-5 rounded-xl text-center">
                 <span className="text-xl font-bold font-mono text-text-primary block">{s.value}</span>
@@ -207,21 +206,21 @@ export function Docs() {
 
           {/* Perf table */}
           <div className="border border-white/[0.06] bg-white/[0.01] rounded-xl p-5 font-mono text-xs text-text-secondary/90 leading-relaxed">
-            <div className="flex justify-between border-b border-white/[0.04] pb-2 text-[10px] text-text-secondary/40 uppercase tracking-wide font-semibold">
-              <span>Parameter</span><span>Value</span><span>Purpose</span>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1.4fr)] gap-x-3 border-b border-white/[0.04] pb-2 text-[10px] text-text-secondary/40 uppercase tracking-wide font-semibold">
+              <span>Parameter</span><span className="text-center">Value</span><span className="text-right">Purpose</span>
             </div>
             {[
-              ['CHUNK_SIZE',            '256 KB',  'Max safe DataChannel chunk'],
-              ['BUFFER_HIGH_WATERMARK', '4 MB',    'Stop filling — OS buffer full'],
-              ['BUFFER_LOW_WATERMARK',  '512 KB',  'Wake pump — buffer draining'],
-              ['STATS_INTERVAL_MS',     '300 ms',  'Progress update cadence'],
-              ['MAX_ICE_RESTARTS',      '3',       'Retry cap before cleanup'],
-              ['iceCandidatePoolSize',  '10',      'Pre-gather for fast connect'],
+              ['CHUNK_SIZE', '256 KB', 'Max safe DataChannel chunk'],
+              ['BUFFER_HIGH_WATERMARK', '4 MB', 'Stop filling — OS buffer full'],
+              ['BUFFER_LOW_WATERMARK', '512 KB', 'Wake pump — buffer draining'],
+              ['STATS_INTERVAL_MS', '300 ms', 'Progress update cadence'],
+              ['MAX_ICE_RESTARTS', '3', 'Retry cap before cleanup'],
+              ['iceCandidatePoolSize', '10', 'Pre-gather for fast connect'],
             ].map(([key, val, desc]) => (
-              <div key={key} className="flex justify-between py-1.5 border-b border-white/[0.02] last:border-0">
-                <span className="text-text-secondary/80 w-48 shrink-0">{key}</span>
-                <span className="text-emerald-400 w-16 shrink-0 text-center">{val}</span>
-                <span className="text-text-secondary/50 text-right">{desc}</span>
+              <div key={key} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1.4fr)] gap-x-3 py-1.5 border-b border-white/[0.02] last:border-0 items-baseline">
+                <span className="text-text-secondary/80 break-words">{key}</span>
+                <span className="text-emerald-400 text-center whitespace-nowrap">{val}</span>
+                <span className="text-text-secondary/50 text-right break-words">{desc}</span>
               </div>
             ))}
           </div>

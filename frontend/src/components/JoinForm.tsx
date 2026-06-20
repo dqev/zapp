@@ -28,10 +28,10 @@ export function JoinForm({ inputCode, setInputCode, handleJoinCode }: JoinFormPr
         <button
           type="submit"
           disabled={inputCode.length !== 6}
-          className="button-primary h-12 sm:h-11 px-6 text-sm font-semibold whitespace-nowrap inline-flex items-center justify-center gap-1.5 transition-all duration-200 w-full sm:w-auto"
+          className="button-primary group h-12 sm:h-11 px-6 text-sm font-semibold whitespace-nowrap inline-flex items-center justify-center gap-1.5 transition-all duration-200 w-full sm:w-auto hover:-translate-y-0.5 disabled:hover:translate-y-0"
         >
           <span>Join</span>
-          <ArrowRight className="h-4 w-4" />
+          <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1 group-disabled:translate-x-0" />
         </button>
       </form>
     </div>
