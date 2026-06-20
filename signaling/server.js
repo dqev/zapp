@@ -1,7 +1,7 @@
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
-const port    = process.env.PORT     || 7860;
+const port    = process.env.PORT     || 8080;
 const MAX_PEERS = parseInt(process.env.MAX_PEERS || '10', 10); // max receivers per broadcast room
 
 // Create an HTTP server for health checks
@@ -51,6 +51,10 @@ wss.on('connection', (ws) => {
   let currentRoomId = null;
   let currentPeerId = null;
 
+  // ws-level heartbeat: mark alive on any pong so dead sockets can be reaped
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   console.log('[WS] New client connected');
 
   ws.on('message', (message) => {
@@ -79,12 +83,19 @@ wss.on('connection', (ws) => {
             break;
           }
 
+          // Close any stale socket for the same peerId (reconnect) before overwriting
+          const previousWs = room.peers.get(peerId);
+          if (previousWs && previousWs !== ws && previousWs.readyState === ws.OPEN) {
+            try { previousWs.close(); } catch { /* ignore */ }
+          }
+
           // Register peer
           room.peers.set(peerId, ws);
 
-          // First peer becomes the host (broadcaster)
-          const isHost = room.host === null;
-          if (isHost) {
+          // First peer becomes the host (broadcaster).
+          // A reconnecting host keeps its role instead of being demoted to a receiver.
+          const isHost = room.host === null || room.host === peerId;
+          if (room.host === null) {
             room.host = peerId;
             console.log(`[Room ${roomId}] Host set: ${peerId}`);
           }
@@ -135,6 +146,7 @@ wss.on('connection', (ws) => {
         }
 
         case 'ping': {
+          ws.isAlive = true;
           safeSend(ws, { type: 'pong' });
           break;
         }
@@ -153,6 +165,14 @@ wss.on('connection', (ws) => {
 
     const room = rooms.get(currentRoomId);
     if (!room) return;
+
+    // Only act if this socket still owns the peer slot. A reconnect may have
+    // already replaced it with a newer socket, in which case we must not
+    // delete the peer or demote the host.
+    if (room.peers.get(currentPeerId) !== ws) {
+      console.log(`[WS] Stale socket for peer ${currentPeerId} closed — ignoring`);
+      return;
+    }
 
     room.peers.delete(currentPeerId);
 
@@ -182,6 +202,20 @@ wss.on('connection', (ws) => {
     console.error('[WS] Socket error:', err);
   });
 });
+
+// Reap dead connections: ping every 30s, terminate sockets that didn't pong
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      try { ws.terminate(); } catch { /* ignore */ }
+      return;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* ignore */ }
+  });
+}, 30000);
+
+wss.on('close', () => clearInterval(heartbeatInterval));
 
 server.listen(port, () => {
   console.log(`[Zapp] Signaling server running on port ${port} (max ${MAX_PEERS} peers/room)`);

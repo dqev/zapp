@@ -15,7 +15,8 @@ export function formatBytes(bytes: number, decimals = 2): string {
  * Formats a number of seconds into a human-readable duration (e.g. "2m 14s").
  */
 export function formatTime(seconds: number): string {
-  if (!seconds || seconds === Infinity) return 'Calculating...';
+  if (!seconds || !isFinite(seconds) || seconds < 0) return 'Calculating...';
+  seconds = Math.round(seconds);
   if (seconds < 60) return `${seconds}s`;
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;

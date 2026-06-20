@@ -40,6 +40,7 @@ interface SenderEntry {
   startTime: number;
   lastReportedBytes: number;
   lastReportedTime: number;
+  lastSpeed: number;  // most recent computed speed (bytes/sec) for this peer
   resolvePump?: () => void;
 }
 
@@ -50,6 +51,7 @@ interface PeerState {
   activeSender: SenderEntry | null;
   pumpRunning: boolean;
   iceRestartCount: number;
+  pendingCandidates: RTCIceCandidateInit[]; // candidates received before remoteDescription is set
 }
 
 interface ReceiverState {
@@ -139,6 +141,9 @@ export function useWebRTC(roomId: string) {
   const receivingRef = useRef<ReceiverState | null>(null);
 
   const isHostRef = useRef(false); // sync copy for callbacks
+
+  // Track every object URL we create so they can be revoked on unmount (prevents leaks)
+  const objectUrlsRef = useRef<Set<string>>(new Set());
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const updateItem = useCallback((id: string, patch: Partial<TransferItem>) => {
@@ -234,21 +239,22 @@ export function useWebRTC(roomId: string) {
             const progress  = Math.round((sender.offset / sender.file.size) * 100);
             sender.lastReportedBytes = sender.offset;
             sender.lastReportedTime  = now;
+            sender.lastSpeed         = speed;
 
-            // Aggregate: compute average progress across all peers sending this file
+            // Aggregate across all peers sending this file: average progress, summed speed
             let totalProgress = 0, totalSpeed = 0, peerCount = 0;
             peersRef.current.forEach(ps2 => {
               const entry = [...ps2.sendQueue, ps2.activeSender].filter(Boolean).find(e => e?.fileId === sender.fileId);
               if (entry) {
                 totalProgress += Math.round((entry.offset / entry.file.size) * 100);
+                totalSpeed    += entry.lastSpeed;
                 peerCount++;
               }
             });
-            // This peer's progress counts too (already updated)
             if (peerCount === 0) peerCount = 1;
             const avgProgress = peerCount > 1 ? Math.round(totalProgress / peerCount) : progress;
 
-            updateItem(sender.fileId, { progress: avgProgress, speed: totalSpeed + speed, eta });
+            updateItem(sender.fileId, { progress: avgProgress, speed: totalSpeed, eta });
           }
         }
 
@@ -299,11 +305,10 @@ export function useWebRTC(roomId: string) {
 
     dc.onclose = () => {
       console.log(`[DC:${remotePeerId}] Closed`);
-      setConnectedPeers(prev => prev.filter(id => id !== remotePeerId));
-      // If no peers left, go back to connecting/disconnected
       setConnectedPeers(prev => {
-        if (prev.length === 0) setConnectionState('disconnected');
-        return prev;
+        const next = prev.filter(id => id !== remotePeerId);
+        if (next.length === 0) setConnectionState('disconnected');
+        return next;
       });
     };
 
@@ -365,17 +370,33 @@ export function useWebRTC(roomId: string) {
       onFileEnd: (id) => {
         const recv = receivingRef.current;
         if (!recv || recv.id !== id) return;
+        // Integrity check: reject truncated transfers instead of saving a partial file
+        if (recv.bytesReceived !== recv.size) {
+          console.error(`[DC] Size mismatch for ${recv.name}: got ${recv.bytesReceived}, expected ${recv.size}`);
+          setTransferQueue(prev => prev.map(item =>
+            item.id === id ? { ...item, status: 'failed', speed: 0, eta: 0 } : item
+          ));
+          receivingRef.current = null;
+          return;
+        }
         const blob = new Blob(recv.chunks, { type: recv.type });
         const url  = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url; a.download = recv.name;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        const isImage = recv.type.startsWith('image/');
+        if (isImage) objectUrlsRef.current.add(url);
         setTransferQueue(prev => prev.map(item =>
           item.id === id
             ? { ...item, progress: 100, status: 'completed', speed: 0, eta: 0,
-                previewUrl: recv.type.startsWith('image/') ? url : item.previewUrl }
+                previewUrl: isImage ? url : item.previewUrl }
             : item
         ));
+        // Revoke the download URL after the browser has had time to start the download.
+        // Image previews keep the URL alive (it's used as previewUrl) and are revoked on row removal.
+        if (!isImage) {
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }
         receivingRef.current = null;
       },
       onFileError: (id) => {
@@ -470,7 +491,8 @@ export function useWebRTC(roomId: string) {
     const ps: PeerState = {
       pc, dc: null,
       sendQueue: [], activeSender: null,
-      pumpRunning: false, iceRestartCount: 0
+      pumpRunning: false, iceRestartCount: 0,
+      pendingCandidates: []
     };
     peersRef.current.set(remotePeerId, ps);
 
@@ -607,9 +629,23 @@ export function useWebRTC(roomId: string) {
                   await ps.pc.setLocalDescription(answer);
                   signalTo(senderPeerId, { sdp: ps.pc.localDescription });
                 }
+                // Flush any ICE candidates that arrived before the remote description
+                if (ps.pendingCandidates.length > 0) {
+                  const queued = ps.pendingCandidates;
+                  ps.pendingCandidates = [];
+                  for (const cand of queued) {
+                    try { await ps.pc.addIceCandidate(new RTCIceCandidate(cand)); }
+                    catch (e) { console.error('[WS] Buffered ICE candidate error:', e); }
+                  }
+                }
               } else if (signalData.candidate) {
-                try { await ps.pc.addIceCandidate(new RTCIceCandidate(signalData.candidate)); }
-                catch (e) { console.error('[WS] ICE candidate error:', e); }
+                // Only add candidates once the remote description exists; otherwise buffer them
+                if (ps.pc.remoteDescription && ps.pc.remoteDescription.type) {
+                  try { await ps.pc.addIceCandidate(new RTCIceCandidate(signalData.candidate)); }
+                  catch (e) { console.error('[WS] ICE candidate error:', e); }
+                } else {
+                  ps.pendingCandidates.push(signalData.candidate);
+                }
               }
               break;
             }
@@ -671,6 +707,7 @@ export function useWebRTC(roomId: string) {
     for (const file of files) {
       const fileId = Math.random().toString(36).substring(2, 9);
       const localPreviewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+      if (localPreviewUrl) objectUrlsRef.current.add(localPreviewUrl);
 
       // Add one UI row per file (aggregate row, not per-peer)
       setTransferQueue(prev => [...prev, {
@@ -700,7 +737,8 @@ export function useWebRTC(roomId: string) {
         ps.sendQueue.push({
           file, fileId, offset: 0,
           paused: false, cancelled: false,
-          startTime: Date.now(), lastReportedBytes: 0, lastReportedTime: Date.now()
+          startTime: Date.now(), lastReportedBytes: 0, lastReportedTime: Date.now(),
+          lastSpeed: 0
         });
 
         // Kick off this peer's pump (idempotent)
@@ -736,6 +774,7 @@ export function useWebRTC(roomId: string) {
       const entry = [...ps.sendQueue, ps.activeSender].filter(Boolean).find(e => e?.fileId === id);
       if (entry && !entry.paused) {
         entry.paused = true;
+        entry.lastSpeed = 0;
       }
     });
     updateItem(id, { status: 'paused', speed: 0, eta: 0 });
@@ -788,6 +827,15 @@ export function useWebRTC(roomId: string) {
     }
     updateItem(id, { status: 'cancelled', speed: 0, eta: 0 });
   }, [updateItem]);
+
+  // Revoke all tracked object URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    const urls = objectUrlsRef.current;
+    return () => {
+      urls.forEach(u => URL.revokeObjectURL(u));
+      urls.clear();
+    };
+  }, []);
 
   // Derived state
   const peerCount = connectedPeers.length;
