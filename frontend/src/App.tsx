@@ -18,17 +18,17 @@ function App() {
     const hash = window.location.hash.substring(1);
     return hash === 'docs' ? '' : hash;
   });
-  
+
   const [view, setView] = useState<'home' | 'docs'>(() => {
     return window.location.hash.substring(1) === 'docs' ? 'docs' : 'home';
   });
-  
+
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [hasStartedSending, setHasStartedSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
-  
+
   // Receiver input code state
   const [inputCode, setInputCode] = useState('');
 
@@ -105,7 +105,7 @@ function App() {
     if (files.length === 0) return;
     const fileArray = Array.from(files);
     setPendingFiles(fileArray);
-    
+
     // Generate a 6-digit numeric room ID code and set hash
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     window.location.hash = randomCode;
@@ -136,12 +136,12 @@ function App() {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#09090b] text-text-primary font-sans relative select-none">
-      
+
       <Header />
-      
+
       {/* Page Content */}
       <div className="flex-grow flex flex-col items-center w-full relative z-10">
-        
+
         {view === 'docs' ? (
           <div className="w-full pt-28 pb-20">
             <Docs />
@@ -153,9 +153,9 @@ function App() {
             {/* 2. Dashboard Workspace Section */}
             <section id="dashboard-workspace" className="w-full max-w-[1200px] mx-auto px-6 md:px-10 mb-20">
               <div className="rounded-2xl bg-element-background/40 element-border shadow-2xl shadow-black/50 p-6 md:p-8 backdrop-blur-md overflow-hidden relative max-w-4xl mx-auto">
-                
+
                 <div className="relative z-10">
-                  
+
                   {/* Top Navigation Trail inside Card */}
                   <div className="flex items-center justify-between border-b border-white/[0.04] pb-4 mb-6">
                     <nav className="flex items-center gap-1.5 text-xs text-text-secondary font-medium">
@@ -176,16 +176,14 @@ function App() {
 
                     <div className="flex items-center gap-2">
                       {roomId && (
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${
-                          isConnected 
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${isConnected
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                             : connectionState === 'failed'
-                            ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            isConnected ? 'bg-emerald-400' : connectionState === 'failed' ? 'bg-red-400' : 'bg-amber-400'
-                          }`} />
+                              ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
+                          }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400' : connectionState === 'failed' ? 'bg-red-400' : 'bg-amber-400'
+                            }`} />
                           {isConnected
                             ? peerCount > 1
                               ? `${peerCount} connected`
@@ -198,7 +196,7 @@ function App() {
 
                   {/* Main Content Areas */}
                   <div className="space-y-6">
-                    
+
                     <AnimatePresence mode="wait">
                       {!roomId ? (
                         /* Initial upload state */
@@ -212,19 +210,22 @@ function App() {
                           <Dropzone onFilesSelected={handleFileSelected} disabled={false} />
 
                           {/* Divider */}
-                          <div className="relative flex items-center justify-center my-6">
-                            <div className="absolute inset-0 flex items-center">
-                              <div className="w-full border-t border-white/[0.04]" />
+                          <div className="relative flex items-center justify-center my-7" role="separator" aria-label="or connect">
+                            {/* Gradient line fading toward the center label */}
+                            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                              <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
                             </div>
-                            <span className="relative px-4 bg-[#09090b] text-xs font-semibold text-text-secondary/40 uppercase tracking-widest">
+                            <span className="relative inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#141416] border border-white/[0.08] shadow-sm shadow-black/30 text-[10px] font-semibold text-text-secondary/70 uppercase tracking-[0.18em]">
+                              <span className="w-1 h-1 rounded-full bg-white/30" aria-hidden="true" />
                               or connect
+                              <span className="w-1 h-1 rounded-full bg-white/30" aria-hidden="true" />
                             </span>
                           </div>
 
-                          <JoinForm 
-                            inputCode={inputCode} 
-                            setInputCode={setInputCode} 
-                            handleJoinCode={handleJoinCode} 
+                          <JoinForm
+                            inputCode={inputCode}
+                            setInputCode={setInputCode}
+                            handleJoinCode={handleJoinCode}
                           />
                         </motion.div>
                       ) : (

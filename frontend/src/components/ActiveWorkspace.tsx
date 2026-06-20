@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Copy, Check, Qr, Refresh2, 
+import {
+  Copy, Check, Qr, Refresh2,
   File, Link,
   Exit, Plus, User
 } from 'reicon-react';
@@ -52,6 +52,14 @@ export function ActiveWorkspace({
   formatBytes
 }: ActiveWorkspaceProps) {
   const [showAllPending, setShowAllPending] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const copyCode = useCallback(() => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId).catch(() => { /* clipboard blocked */ });
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }, [roomId]);
 
   // Memory-safe object URL cache (BUG-2 fix)
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
@@ -92,12 +100,12 @@ export function ActiveWorkspace({
     e.target.value = '';
   }, [sendFiles]);
 
-  const isSender      = pendingFiles.length > 0 || isHost;
+  const isSender = pendingFiles.length > 0 || isHost;
   const firstIncoming = !isSender ? transferQueue.find(i => i.direction === 'receive') ?? null : null;
-  const pendingCount  = pendingFiles.length;
+  const pendingCount = pendingFiles.length;
 
   const activeTransfers = transferQueue.filter(i => i.status === 'transferring' || i.status === 'paused');
-  const totalSpeed      = activeTransfers.reduce((sum, i) => sum + i.speed, 0);
+  const totalSpeed = activeTransfers.reduce((sum, i) => sum + i.speed, 0);
 
   // Host: show share link even after peers connect (so more can join)
   const showSharePanel = isHost || (!isConnected && pendingFiles.length > 0);
@@ -119,9 +127,21 @@ export function ActiveWorkspace({
             <span className="text-[10px] font-semibold text-text-secondary/60 tracking-wider uppercase block">
               Passkey code
             </span>
-            <span className="text-3xl font-bold font-mono tracking-widest text-text-primary block mt-2">
-              {roomId.substring(0, 3)} {roomId.substring(3)}
-            </span>
+            <div className="flex items-center gap-3 mt-2">
+              <span className="text-3xl font-bold font-mono tracking-widest text-text-primary block">
+                {roomId.substring(0, 3)} {roomId.substring(3)}
+              </span>
+              <button
+                onClick={copyCode}
+                title="Copy code"
+                className={`p-2 rounded-full border transition-all duration-200 shrink-0 active:scale-95 ${codeCopied
+                    ? 'bg-white text-black border-white'
+                    : 'bg-[#202020] hover:bg-[#252525] text-text-secondary border-white/10'
+                  }`}
+              >
+                {codeCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
           </div>
 
           {/* Peer count indicator for host */}
@@ -167,11 +187,10 @@ export function ActiveWorkspace({
                 </span>
                 <button
                   onClick={copyToClipboard}
-                  className={`p-2 rounded-full border transition-all duration-200 shrink-0 ${
-                    copied
-                      ? 'bg-white text-black border-white'
-                      : 'bg-[#202020] hover:bg-[#252525] text-text-secondary border-white/10'
-                  }`}
+                  className={`p-2 rounded-full border transition-all duration-200 shrink-0 ${copied
+                    ? 'bg-white text-black border-white'
+                    : 'bg-[#202020] hover:bg-[#252525] text-text-secondary border-white/10'
+                    }`}
                 >
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 </button>
@@ -235,8 +254,8 @@ export function ActiveWorkspace({
             {pendingFiles.length > 0 ? (
               <div className="space-y-2">
                 {(showAllPending ? pendingFiles : pendingFiles.slice(0, 3)).map((file, idx) => {
-                  const preview    = getOrCreatePreviewUrl(file);
-                  const queueItem  = transferQueue.find(i => i.name === file.name && i.direction === 'send');
+                  const preview = getOrCreatePreviewUrl(file);
+                  const queueItem = transferQueue.find(i => i.name === file.name && i.direction === 'send');
                   return (
                     <div key={idx} className="flex items-center gap-3">
                       {preview ? (
@@ -253,15 +272,14 @@ export function ActiveWorkspace({
                         <p className="text-[10px] font-mono text-text-secondary/50">{formatBytes(file.size)}</p>
                       </div>
                       {queueItem && (
-                        <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${
-                          queueItem.status === 'completed'
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : queueItem.status === 'transferring'
+                        <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${queueItem.status === 'completed'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : queueItem.status === 'transferring'
                             ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                             : queueItem.status === 'paused'
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            : 'bg-white/5 text-text-secondary border-white/10'
-                        }`}>
+                              ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                              : 'bg-white/5 text-text-secondary border-white/10'
+                          }`}>
                           {queueItem.status}
                         </span>
                       )}

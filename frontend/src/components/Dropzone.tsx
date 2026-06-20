@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Library, Folder } from 'reicon-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Library, File as FileIcon, Folder, Text, ChevronDown } from 'reicon-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface DropzoneProps {
@@ -38,13 +38,38 @@ async function collectFilesFromEntry(entry: FileSystemEntry): Promise<File[]> {
   return [];
 }
 
+// Wrap an array of File objects into a FileList via DataTransfer
+function toFileList(files: File[]): FileList {
+  const dt = new DataTransfer();
+  files.forEach(f => dt.items.add(f));
+  return dt.files;
+}
+
 export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
-  const [isDragOver, setIsDragOver]     = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
-  const fileInputRef   = useRef<HTMLInputElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [textContent, setTextContent] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const dragCounter    = useRef(0); // track nested drag enter/leave
+  const menuRef = useRef<HTMLDivElement>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const dragCounter = useRef(0); // track nested drag enter/leave
+
+  // Close the dropdown when clicking outside of it
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -93,11 +118,7 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
       const fileArrays = await Promise.all(entries.map(collectFilesFromEntry));
       const files = fileArrays.flat().filter(Boolean);
       if (files.length === 0) return;
-
-      // Convert File[] → FileList-like object via DataTransfer
-      const dt = new DataTransfer();
-      files.forEach(f => dt.items.add(f));
-      onFilesSelected(dt.files);
+      onFilesSelected(toFileList(files));
     } else if (e.dataTransfer.files.length > 0) {
       onFilesSelected(e.dataTransfer.files);
     }
@@ -111,6 +132,47 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
     e.target.value = '';
   };
 
+  // ── Dropdown actions ───────────────────────────────────────────────────────
+  const handleUploadFile = () => {
+    setMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleUploadFolder = () => {
+    setMenuOpen(false);
+    folderInputRef.current?.click();
+  };
+
+  const handleUploadText = async () => {
+    setMenuOpen(false);
+    setShowTextInput(true);
+    // Try to prefill from the clipboard so already-copied text shows up automatically
+    try {
+      const clip = await navigator.clipboard.readText();
+      if (clip && clip.trim().length > 0) {
+        setTextContent(clip);
+      }
+    } catch {
+      // Clipboard read blocked (no permission / not focused) — user can paste manually
+    }
+    setTimeout(() => textAreaRef.current?.focus(), 50);
+  };
+
+  const handleSendText = () => {
+    const content = textContent.trim();
+    if (!content) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const file = new File([content], `text-${stamp}.txt`, { type: 'text/plain' });
+    onFilesSelected(toFileList([file]));
+    setTextContent('');
+    setShowTextInput(false);
+  };
+
+  const handleCancelText = () => {
+    setShowTextInput(false);
+    setTextContent('');
+  };
+
   return (
     <div className="w-full relative z-20 flex-grow flex flex-col justify-center min-h-[280px]">
       <motion.div
@@ -121,17 +183,17 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
         whileHover={{ scale: disabled ? 1 : 1.005 }}
         whileTap={{ scale: disabled ? 1 : 0.99 }}
         transition={{ duration: 0.2 }}
-        className={`relative flex-grow flex flex-col items-center justify-center p-10 cursor-pointer rounded-xl transition-all duration-300 ${
-          disabled
+        className={`relative flex-grow flex flex-col items-center justify-center cursor-pointer rounded-xl transition-all duration-300 ${showTextInput ? 'p-2 sm:p-3' : 'p-5 sm:p-10'
+          } ${disabled
             ? 'opacity-30 cursor-not-allowed border border-white/10 bg-black/20'
             : isDragOver
-            ? 'border-2 border-white bg-element-background/30 shadow-2xl shadow-white/5'
-            : isDragActive
-            ? 'border-2 border-white/50 bg-element-background/20'
-            : 'element-border bg-element-background/10 hover:bg-element-background/25'
-        }`}
+              ? 'border-2 border-white bg-element-background/30 shadow-2xl shadow-white/5'
+              : isDragActive
+                ? 'border-2 border-white/50 bg-element-background/20'
+                : 'element-border bg-element-background/10 hover:bg-element-background/25'
+          }`}
       >
-        {/* Hidden file inputs */}
+        {/* Hidden file input — single or multiple files */}
         <input
           ref={fileInputRef}
           type="file"
@@ -140,11 +202,11 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
           onChange={handleFileChange}
           disabled={disabled}
         />
-        {/* Folder input */}
+        {/* Hidden folder input */}
         <input
           ref={folderInputRef}
           type="file"
-          // @ts-ignore — webkitdirectory is non-standard but widely supported
+          // @ts-expect-error — webkitdirectory is non-standard but widely supported
           webkitdirectory=""
           multiple
           className="hidden"
@@ -152,14 +214,16 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
           disabled={disabled}
         />
 
-        {/* Icon */}
-        <motion.div
-          animate={{ scale: isDragActive ? 1.15 : 1, rotate: isDragActive ? 5 : 0 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-          className="mb-5 bg-white/5 border border-white/10 p-4 rounded-full flex items-center justify-center text-text-secondary"
-        >
-          <Library className={`h-6 w-6 ${isDragActive ? 'text-white' : 'text-text-secondary'}`} />
-        </motion.div>
+        {/* Icon — hidden in text mode */}
+        {!showTextInput && (
+          <motion.div
+            animate={{ scale: isDragActive ? 1.15 : 1, rotate: isDragActive ? 5 : 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            className="mb-5 bg-white/5 border border-white/10 p-4 rounded-full flex items-center justify-center text-text-secondary"
+          >
+            <Library className={`h-6 w-6 ${isDragActive ? 'text-white' : 'text-text-secondary'}`} />
+          </motion.div>
+        )}
 
         <AnimatePresence mode="wait">
           {isDragActive ? (
@@ -177,6 +241,46 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
               </h4>
               <p className="text-white/60 text-xs">Folders supported — all files inside will be queued</p>
             </motion.div>
+          ) : showTextInput ? (
+            <motion.div
+              key="text-input"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2">
+                <span className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-widest">
+                  Paste or type text
+                </span>
+              </div>
+              <textarea
+                ref={textAreaRef}
+                value={textContent}
+                onChange={(e) => { setTextContent(e.target.value); }}
+                placeholder="Paste your text here — it will be sent as a .txt file"
+                rows={5}
+                className="w-full resize-none bg-black/40 border border-white/10 rounded-xl p-3 text-xs font-mono text-text-primary placeholder-text-secondary/40 outline-none focus:border-white/30 transition-colors"
+              />
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center sm:justify-end gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={handleCancelText}
+                  className="button-secondary px-5 py-2 text-xs font-semibold rounded-full transition-all duration-200 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendText}
+                  disabled={textContent.trim().length === 0}
+                  className="button-primary px-5 py-2 text-xs font-semibold rounded-full disabled:opacity-40 transition-all duration-200 active:scale-95"
+                >
+                  Send Text
+                </button>
+              </div>
+            </motion.div>
           ) : (
             <motion.div
               key="idle"
@@ -191,26 +295,56 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
               <p className="text-text-secondary/70 text-xs px-4 max-w-sm font-normal leading-relaxed mb-5">
                 {disabled
                   ? 'Establishing connection… transfer starts automatically once connected.'
-                  : 'Multiple files and entire folders supported. Direct browser-to-browser streaming.'}
+                  : 'Files, entire folders, or pasted text supported. Direct browser-to-browser streaming.'}
               </p>
 
               {!disabled && (
-                <div className="flex items-center gap-2 justify-center">
+                <div className="relative inline-block" ref={menuRef}>
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    className="px-4 py-2 text-xs font-semibold rounded-full bg-white/10 hover:bg-white/15 border border-white/10 hover:border-white/20 text-text-primary transition-all duration-200 active:scale-95"
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
+                    className="button-primary group inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-full transition-all duration-200 active:scale-95"
                   >
-                    Browse Files
+                    <span>Upload</span>
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
-                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-text-secondary hover:text-text-primary transition-all duration-200 active:scale-95"
-                  >
-                    <Folder className="h-3.5 w-3.5" />
-                    Browse Folder
-                  </button>
+
+                  <AnimatePresence>
+                    {menuOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-1/2 -translate-x-1/2 mt-2 w-44 z-30 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 overflow-hidden p-1"
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleUploadFile(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 rounded-lg transition-colors text-left"
+                        >
+                          <FileIcon className="h-3.5 w-3.5 shrink-0" />
+                          Upload File
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleUploadFolder(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 rounded-lg transition-colors text-left"
+                        >
+                          <Folder className="h-3.5 w-3.5 shrink-0" />
+                          Upload Folder
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleUploadText(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/5 rounded-lg transition-colors text-left"
+                        >
+                          <Text className="h-3.5 w-3.5 shrink-0" />
+                          Upload Text
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
             </motion.div>
