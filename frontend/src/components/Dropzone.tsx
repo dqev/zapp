@@ -180,6 +180,11 @@ export function Dropzone({ onFilesSelected, disabled }: DropzoneProps) {
         onDragOver={handleDrag}
         onDragLeave={handleDrag}
         onDrop={handleDrop}
+        onClick={() => {
+          if (!disabled && !showTextInput && !menuOpen) {
+            fileInputRef.current?.click();
+          }
+        }}
         whileHover={{ scale: disabled ? 1 : 1.005 }}
         whileTap={{ scale: disabled ? 1 : 0.99 }}
         transition={{ duration: 0.2 }}

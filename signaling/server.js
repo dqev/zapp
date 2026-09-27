@@ -69,11 +69,11 @@ wss.on('connection', (ws) => {
 
           const room = getRoomInfo(roomId);
 
-          // Count only active connections (exclude the joining ws itself)
-          const activePeers = Array.from(room.peers.values())
-            .filter(sock => sock !== ws && sock.readyState === ws.OPEN);
+          // Count active receivers (excluding host and the joining ws itself)
+          const activeReceivers = Array.from(room.peers.entries())
+            .filter(([id, sock]) => id !== room.host && sock !== ws && sock.readyState === ws.OPEN);
 
-          if (activePeers.length >= MAX_PEERS) {
+          if (room.host !== null && room.host !== peerId && activeReceivers.length >= MAX_PEERS) {
             safeSend(ws, {
               type: 'error',
               code: 'ROOM_FULL',
@@ -83,14 +83,13 @@ wss.on('connection', (ws) => {
             break;
           }
 
-          // Close any stale socket for the same peerId (reconnect) before overwriting
+          // Register peer FIRST before closing previous socket so stale 'close' event detects it as replaced
           const previousWs = room.peers.get(peerId);
+          room.peers.set(peerId, ws);
+
           if (previousWs && previousWs !== ws && previousWs.readyState === ws.OPEN) {
             try { previousWs.close(); } catch { /* ignore */ }
           }
-
-          // Register peer
-          room.peers.set(peerId, ws);
 
           // First peer becomes the host (broadcaster).
           // A reconnecting host keeps its role instead of being demoted to a receiver.
@@ -131,14 +130,15 @@ wss.on('connection', (ws) => {
 
         case 'signal': {
           const { roomId, peerId, targetId, signalData } = data;
+          if (currentRoomId !== roomId || currentPeerId !== peerId) break;
           const room = rooms.get(roomId);
-          if (!room) break;
+          if (!room || room.peers.get(peerId) !== ws) break;
 
           const targetWs = room.peers.get(targetId);
           if (targetWs && targetWs.readyState === targetWs.OPEN) {
             targetWs.send(JSON.stringify({
               type: 'signal',
-              peerId,      // Who sent the signal
+              peerId: currentPeerId,      // Bound sender identity
               signalData
             }));
           }

@@ -18,7 +18,13 @@ export function formatTime(seconds: number): string {
   if (!seconds || !isFinite(seconds) || seconds < 0) return 'Calculating...';
   seconds = Math.round(seconds);
   if (seconds < 60) return `${seconds}s`;
-  const mins = Math.floor(seconds / 60);
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  }
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
-  return `${mins}m ${secs}s`;
+  return `${hrs}h ${mins}m ${secs}s`;
 }

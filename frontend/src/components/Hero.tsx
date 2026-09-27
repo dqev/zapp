@@ -14,8 +14,7 @@ export function Hero({ scrollToWorkspace }: HeroProps) {
         transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
         className="font-serif font-medium tracking-tight text-3xl sm:text-4xl md:text-[54px] text-text-primary text-center leading-[1.35] max-w-3xl"
       >
-        Direct Peer-to-Peer File Transfer <br />
-        Without Server Uploads
+        Send files <span className="italic">directly</span> from <span className="italic">browser to browser</span>
       </motion.h1>
 
       <motion.p

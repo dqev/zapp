@@ -1,134 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  CHUNK_SIZE, BUFFER_HIGH_WATERMARK,
+  BUFFER_LOW_WATERMARK, STATS_INTERVAL_MS, MAX_ICE_RESTARTS
+} from './webrtc/types';
+import type {
+  TransferItem, TextMessage,
+  PeerState, BroadcastFile, ReceiverState
+} from './webrtc/types';
+import { buildIceConfig } from './webrtc/config';
+import { generateThumbnail } from './webrtc/thumbnail';
 
-// ─── Public interfaces ────────────────────────────────────────────────────────
-export interface TransferItem {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  progress: number;   // 0–100 (aggregate across all receivers when hosting)
-  speed: number;      // bytes/sec (aggregate)
-  eta: number;        // seconds
-  status: 'queued' | 'transferring' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  direction: 'send' | 'receive';
-  previewUrl?: string;
-  // Multi-peer: per-receiver breakdown (only populated when isHost)
-  peers?: { peerId: string; progress: number; speed: number; status: string }[];
-}
+// Re-export types for component consumers so existing imports stay intact
+export type { TransferItem, TextMessage };
 
-export interface TextMessage {
-  id: string;
-  sender: 'self' | 'peer';
-  content: string;
-  timestamp: string;
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-const CHUNK_SIZE            = 262144;           // 256 KB
-const BUFFER_HIGH_WATERMARK = 8 * 1024 * 1024;  // 8 MB — keep the SCTP pipe fuller for higher throughput
-const BUFFER_LOW_WATERMARK  = 1 * 1024 * 1024;  // 1 MB
-const STATS_INTERVAL_MS     = 300;
-const MAX_ICE_RESTARTS      = 3;
-
-// ─── Internal types ───────────────────────────────────────────────────────────
-interface SenderEntry {
-  file: File;
-  fileId: string;     // shared ID used in metadata/end/cancel messages
-  thumb?: string;     // precomputed image thumbnail (sent with metadata)
-  metadataSent: boolean; // whether file-metadata has been emitted to this peer yet
-  offset: number;
-  paused: boolean;
-  cancelled: boolean;
-  startTime: number;
-  lastReportedBytes: number;
-  lastReportedTime: number;
-  lastSpeed: number;  // most recent computed speed (bytes/sec) for this peer
-  resolvePump?: () => void;
-}
-
-interface PeerState {
-  pc: RTCPeerConnection;
-  dc: RTCDataChannel | null;
-  sendQueue: SenderEntry[];
-  activeSender: SenderEntry | null;
-  pumpRunning: boolean;
-  iceRestartCount: number;
-  pendingCandidates: RTCIceCandidateInit[]; // candidates received before remoteDescription is set
-  queuedFileIds: Set<string>;               // fileIds already queued to this peer (dedupe)
-}
-
-// A file the local node is broadcasting; replayed to every peer that connects
-interface BroadcastFile {
-  file: File;
-  fileId: string;
-  thumb?: string;
-}
-
-interface ReceiverState {
-  id: string; name: string; size: number; type: string;
-  chunks: ArrayBuffer[];
-  bytesReceived: number;
-  startTime: number;
-  lastReportedBytes: number;
-  lastReportedTime: number;
-}
-
-// ─── Thumbnail helper ─────────────────────────────────────────────────────────
-function generateThumbnail(file: File): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    if (!file.type.startsWith('image/')) { resolve(undefined); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 120;
-        let w = img.width, h = img.height;
-        if (w > h) { if (w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; } }
-        else        { if (h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; } }
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (ctx) { ctx.drawImage(img, 0, 0, w, h); resolve(canvas.toDataURL('image/jpeg', 0.6)); }
-        else resolve(undefined);
-      };
-      img.onerror = () => resolve(undefined);
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => resolve(undefined);
-    reader.readAsDataURL(file);
-  });
-}
-
-// ─── RTCPeerConnection config ─────────────────────────────────────────────────
-function buildIceConfig(): RTCConfiguration {
-  const iceServers: RTCIceServer[] = [
-    { urls: 'stun:stun.l.google.com:19302'  },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  ];
-  const turnUrl = import.meta.env.VITE_TURN_URL;
-  if (turnUrl) {
-    iceServers.push({
-      urls: turnUrl,
-      username:   import.meta.env.VITE_TURN_USERNAME   || undefined,
-      credential: import.meta.env.VITE_TURN_CREDENTIAL || undefined,
-    });
-  }
-  return {
-    iceServers,
-    iceCandidatePoolSize: 10,
-    bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require',
-  };
-}
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useWebRTC(roomId: string) {
   const [peerId]         = useState(() => Math.random().toString(36).substring(2, 9));
   const [isHost, setIsHost]             = useState(false);
@@ -143,8 +27,6 @@ export function useWebRTC(roomId: string) {
   const wsRef = useRef<WebSocket | null>(null);
 
   // Star topology: one PeerState per remote peer
-  // Host: Map has one entry per receiver
-  // Receiver: Map has exactly one entry (the host)
   const peersRef = useRef<Map<string, PeerState>>(new Map());
 
   // Receiver-side state (only used when !isHost)
@@ -152,15 +34,13 @@ export function useWebRTC(roomId: string) {
 
   const isHostRef = useRef(false); // sync copy for callbacks
 
-  // Track every object URL we create so they can be revoked on unmount (prevents leaks)
+  // Track object URLs for revocation on unmount (prevents leaks)
   const objectUrlsRef = useRef<Set<string>>(new Set());
 
   // Files this node is broadcasting — replayed to any peer that connects later (late joiners)
   const broadcastFilesRef = useRef<BroadcastFile[]>([]);
 
-  // Per-peer set of fileIds that peer has FULLY received. Keyed by peerId so it
-  // survives reconnects (a new PeerState is created on reconnect, but this persists),
-  // preventing already-completed files from being re-sent.
+  // Per-peer set of fileIds that peer has FULLY received (survives reconnects)
   const completedByPeerRef = useRef<Map<string, Set<string>>>(new Map());
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -193,7 +73,6 @@ export function useWebRTC(roomId: string) {
           next.startTime         = Date.now();
           next.lastReportedBytes = 0;
           next.lastReportedTime  = Date.now();
-          // Update aggregate status — only set transferring if not already
           updateItem(next.fileId, { status: 'transferring' });
         }
 
@@ -203,9 +82,6 @@ export function useWebRTC(roomId: string) {
         if (!dc || dc.readyState !== 'open') break;
         if (sender.cancelled) { ps.activeSender = null; continue; }
 
-        // Emit file-metadata exactly once, right before this file's chunks.
-        // This keeps strict metadata → chunks → file-end ordering per peer, so the
-        // receiver's single-slot reassembler never mixes chunks between files.
         if (!sender.metadataSent) {
           try {
             dc.send(JSON.stringify({
@@ -234,7 +110,6 @@ export function useWebRTC(roomId: string) {
         // Inner chunk loop
         while (sender.offset < sender.file.size && !sender.paused && !sender.cancelled) {
           if (dc.bufferedAmount > BUFFER_HIGH_WATERMARK) {
-            // Wait for the buffer to drain, then resume streaming this same file
             await new Promise<void>(resolve => { sender.resolvePump = resolve; });
             const currentPeer = peersRef.current.get(remotePeerId);
             if (!currentPeer?.dc || currentPeer.dc.readyState !== 'open') return;
@@ -265,7 +140,6 @@ export function useWebRTC(roomId: string) {
 
           sender.offset = end;
 
-          // Stats update (per-peer, then aggregate across all peers for same fileId)
           const now = Date.now();
           if (now - sender.lastReportedTime >= STATS_INTERVAL_MS || sender.offset === sender.file.size) {
             const bytesDiff = sender.offset - sender.lastReportedBytes;
@@ -278,7 +152,6 @@ export function useWebRTC(roomId: string) {
             sender.lastReportedTime  = now;
             sender.lastSpeed         = speed;
 
-            // Aggregate across all peers sending this file: average progress, summed speed
             let totalProgress = 0, totalSpeed = 0, peerCount = 0;
             peersRef.current.forEach(ps2 => {
               const entry = [...ps2.sendQueue, ps2.activeSender].filter(Boolean).find(e => e?.fileId === sender.fileId);
@@ -295,18 +168,16 @@ export function useWebRTC(roomId: string) {
           }
         }
 
-        // Done sending to this peer?
         const currentPeer2 = peersRef.current.get(remotePeerId);
         const currentDc2   = currentPeer2?.dc;
         if (!sender.cancelled && sender.offset >= sender.file.size) {
           if (currentDc2 && currentDc2.readyState === 'open') {
             currentDc2.send(JSON.stringify({ type: 'file-end', id: sender.fileId }));
           }
-          // Record that THIS peer has fully received this file (survives reconnects)
           let done = completedByPeerRef.current.get(remotePeerId);
           if (!done) { done = new Set(); completedByPeerRef.current.set(remotePeerId, done); }
           done.add(sender.fileId);
-          // Check if ALL peers have finished this file
+
           let allDone = true;
           peersRef.current.forEach(ps2 => {
             const isActive = ps2.activeSender?.fileId === sender.fileId && ps2.activeSender.offset < ps2.activeSender.file.size;
@@ -329,11 +200,10 @@ export function useWebRTC(roomId: string) {
     }
   }, [updateItem]);
 
-  // ── Queue a single broadcast file to one peer (dedup + kick the pump) ──────
+  // ── Queue a single broadcast file to one peer ────────────────────────────
   const queueFileToPeer = useCallback((remotePeerId: string, ps: PeerState, bf: BroadcastFile) => {
-    if (!ps.dc || ps.dc.readyState !== 'open') return; // defer — dc.onopen will replay
-    if (ps.queuedFileIds.has(bf.fileId)) return;        // already queued to this peer
-    // Skip files this peer has already fully received (survives reconnects)
+    if (!ps.dc || ps.dc.readyState !== 'open') return;
+    if (ps.queuedFileIds.has(bf.fileId)) return;
     if (completedByPeerRef.current.get(remotePeerId)?.has(bf.fileId)) return;
     ps.queuedFileIds.add(bf.fileId);
     ps.sendQueue.push({
@@ -358,8 +228,6 @@ export function useWebRTC(roomId: string) {
       console.log(`[DC:${remotePeerId}] Opened`);
       setConnectedPeers(prev => prev.includes(remotePeerId) ? prev : [...prev, remotePeerId]);
       setConnectionState('connected');
-      // Replay every broadcast file to this peer. Late joiners get the full set;
-      // peers already mid-transfer are deduped via queuedFileIds.
       broadcastFilesRef.current.forEach(bf => queueFileToPeer(remotePeerId, ps, bf));
       if (ps.sendQueue.length > 0) runPumpForPeer(remotePeerId);
     };
@@ -386,10 +254,9 @@ export function useWebRTC(roomId: string) {
         runPumpForPeer(remotePeerId);
       }
     };
-  }, [runPumpForPeer, queueFileToPeer]); // handleIncomingMessage via ref below
+  }, [runPumpForPeer, queueFileToPeer]);
 
   // ── Incoming message router ───────────────────────────────────────────────
-  // Use a ref so callbacks always have fresh state without stale closures
   const dispatchRef = useRef<{
     onText: (msg: { id: string; content: string }) => void;
     onFileMetadata: (msg: { id: string; name: string; size: number; fileType: string; preview?: string }) => void;
@@ -406,7 +273,6 @@ export function useWebRTC(roomId: string) {
     onBinaryChunk: () => {},
   });
 
-  // Keep dispatch ref fresh
   useEffect(() => {
     dispatchRef.current = {
       onText: (msg) => {
@@ -421,17 +287,25 @@ export function useWebRTC(roomId: string) {
           chunks: [], bytesReceived: 0,
           startTime: Date.now(), lastReportedBytes: 0, lastReportedTime: Date.now()
         };
-        setTransferQueue(prev => [...prev, {
-          id: msg.id, name: msg.name, size: msg.size, type: msg.fileType,
-          progress: 0, speed: 0, eta: 0,
-          status: 'transferring', direction: 'receive',
-          previewUrl: msg.preview
-        }]);
+        setTransferQueue(prev => {
+          const exists = prev.some(item => item.id === msg.id);
+          if (exists) {
+            return prev.map(item => item.id === msg.id ? {
+              ...item, name: msg.name, size: msg.size, type: msg.fileType,
+              progress: 0, speed: 0, eta: 0, status: 'transferring', previewUrl: msg.preview
+            } : item);
+          }
+          return [...prev, {
+            id: msg.id, name: msg.name, size: msg.size, type: msg.fileType,
+            progress: 0, speed: 0, eta: 0,
+            status: 'transferring', direction: 'receive',
+            previewUrl: msg.preview
+          }];
+        });
       },
       onFileEnd: (id) => {
         const recv = receivingRef.current;
         if (!recv || recv.id !== id) return;
-        // Integrity check: reject truncated transfers instead of saving a partial file
         if (recv.bytesReceived !== recv.size) {
           console.error(`[DC] Size mismatch for ${recv.name}: got ${recv.bytesReceived}, expected ${recv.size}`);
           setTransferQueue(prev => prev.map(item =>
@@ -442,21 +316,22 @@ export function useWebRTC(roomId: string) {
         }
         const blob = new Blob(recv.chunks, { type: recv.type });
         const url  = URL.createObjectURL(blob);
+        objectUrlsRef.current.add(url);
         const a = document.createElement('a');
         a.href = url; a.download = recv.name;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         const isImage = recv.type.startsWith('image/');
-        if (isImage) objectUrlsRef.current.add(url);
         setTransferQueue(prev => prev.map(item =>
           item.id === id
             ? { ...item, progress: 100, status: 'completed', speed: 0, eta: 0,
                 previewUrl: isImage ? url : item.previewUrl }
             : item
         ));
-        // Revoke the download URL after the browser has had time to start the download.
-        // Image previews keep the URL alive (it's used as previewUrl) and are revoked on row removal.
         if (!isImage) {
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          setTimeout(() => {
+            URL.revokeObjectURL(url);
+            objectUrlsRef.current.delete(url);
+          }, 60000);
         }
         receivingRef.current = null;
       },
@@ -493,18 +368,18 @@ export function useWebRTC(roomId: string) {
         }
       }
     };
-  }); // no deps — always fresh
+  });
 
   const handleIncomingMessage = useCallback((_remotePeerId: string, event: MessageEvent) => {
     if (typeof event.data === 'string') {
       try {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
-          case 'text':         dispatchRef.current.onText(msg); break;
-          case 'file-metadata':dispatchRef.current.onFileMetadata(msg); break;
-          case 'file-end':     dispatchRef.current.onFileEnd(msg.id); break;
-          case 'file-error':   dispatchRef.current.onFileError(msg.id); break;
-          case 'file-cancel':  dispatchRef.current.onFileCancel(msg.id); break;
+          case 'text':          dispatchRef.current.onText(msg); break;
+          case 'file-metadata': dispatchRef.current.onFileMetadata(msg); break;
+          case 'file-end':      dispatchRef.current.onFileEnd(msg.id); break;
+          case 'file-error':    dispatchRef.current.onFileError(msg.id); break;
+          case 'file-cancel':   dispatchRef.current.onFileCancel(msg.id); break;
         }
       } catch (e) { console.error('[DC] Parse error:', e); }
     } else {
@@ -512,7 +387,7 @@ export function useWebRTC(roomId: string) {
     }
   }, []);
 
-  // ── Cleanup a single peer's connection ───────────────────────────────────
+  // ── Cleanup peer connection ───────────────────────────────────────────────
   const cleanupPeer = useCallback((remotePeerId: string) => {
     const ps = peersRef.current.get(remotePeerId);
     if (!ps) return;
@@ -533,7 +408,6 @@ export function useWebRTC(roomId: string) {
     });
   }, []);
 
-  // ── Cleanup all peers ─────────────────────────────────────────────────────
   const cleanupAllPeers = useCallback(() => {
     peersRef.current.forEach((_, pid) => cleanupPeer(pid));
     setConnectionState('disconnected');
@@ -542,11 +416,10 @@ export function useWebRTC(roomId: string) {
     completedByPeerRef.current.clear();
   }, [cleanupPeer]);
 
-  // ── Initiate connection to a specific peer ────────────────────────────────
+  // ── Initiate connection ───────────────────────────────────────────────────
   const initiatePeerConnection = useCallback((remotePeerId: string, isCaller: boolean) => {
     console.log(`[WebRTC] Connect to ${remotePeerId}, isCaller: ${isCaller}`);
 
-    // Clean up any existing connection to this peer
     cleanupPeer(remotePeerId);
 
     const pc = new RTCPeerConnection(buildIceConfig());
@@ -575,7 +448,17 @@ export function useWebRTC(roomId: string) {
         if (currentPs.iceRestartCount < MAX_ICE_RESTARTS) {
           currentPs.iceRestartCount++;
           console.log(`[PC:${remotePeerId}] ICE restart ${currentPs.iceRestartCount}/${MAX_ICE_RESTARTS}`);
-          pc.restartIce();
+          try {
+            pc.restartIce();
+            if (isCaller) {
+              pc.createOffer({ iceRestart: true }).then(async (offer) => {
+                await pc.setLocalDescription(offer);
+                signalTo(remotePeerId, { sdp: pc.localDescription });
+              }).catch(err => console.error(`[PC:${remotePeerId}] ICE restart offer failed:`, err));
+            }
+          } catch (err) {
+            console.error(`[PC:${remotePeerId}] restartIce error:`, err);
+          }
         } else {
           console.warn(`[PC:${remotePeerId}] Max ICE restarts — giving up`);
           cleanupPeer(remotePeerId);
@@ -587,7 +470,17 @@ export function useWebRTC(roomId: string) {
           if (p2.pc.connectionState === 'disconnected' || p2.pc.connectionState === 'failed') {
             if (p2.iceRestartCount < MAX_ICE_RESTARTS) {
               p2.iceRestartCount++;
-              p2.pc.restartIce();
+              try {
+                p2.pc.restartIce();
+                if (isCaller) {
+                  p2.pc.createOffer({ iceRestart: true }).then(async (offer) => {
+                    await p2.pc.setLocalDescription(offer);
+                    signalTo(remotePeerId, { sdp: p2.pc.localDescription });
+                  }).catch(err => console.error(`[PC:${remotePeerId}] ICE restart offer failed:`, err));
+                }
+              } catch (err) {
+                console.error(`[PC:${remotePeerId}] restartIce error:`, err);
+              }
             } else {
               cleanupPeer(remotePeerId);
             }
@@ -599,7 +492,6 @@ export function useWebRTC(roomId: string) {
     };
 
     if (isCaller) {
-      // Host creates the DataChannel
       const dc = pc.createDataChannel('zapp-transfer', { ordered: true });
       setupDataChannel(remotePeerId, dc);
       pc.createOffer().then(async (offer) => {
@@ -607,7 +499,6 @@ export function useWebRTC(roomId: string) {
         signalTo(remotePeerId, { sdp: pc.localDescription });
       });
     } else {
-      // Receiver waits for the DataChannel from the host
       pc.ondatachannel = (event) => setupDataChannel(remotePeerId, event.channel);
     }
   }, [signalTo, cleanupPeer, setupDataChannel]);
@@ -645,18 +536,15 @@ export function useWebRTC(roomId: string) {
           switch (data.type) {
 
             case 'joined': {
-              // Server tells us our role and who's already in the room
               const meIsHost = data.isHost as boolean;
               isHostRef.current = meIsHost;
               setIsHost(meIsHost);
               setHostId(data.hostId as string | null);
 
               if (meIsHost) {
-                // Host: connect to every existing peer (receivers already in the room)
                 const existingPeers: string[] = data.peers || [];
                 existingPeers.forEach(rid => initiatePeerConnection(rid, true));
               } else {
-                // Receiver: connect to the host
                 const hid = data.hostId as string;
                 if (hid && hid !== peerId) initiatePeerConnection(hid, false);
               }
@@ -664,22 +552,18 @@ export function useWebRTC(roomId: string) {
             }
 
             case 'peer-joined': {
-              // A new peer joined the room
               const newPeerId = data.peerId as string;
-              if (newPeerId === peerId) break; // ignore self
+              if (newPeerId === peerId) break;
 
               if (isHostRef.current) {
-                // Host: a new receiver arrived — open a connection to them
                 initiatePeerConnection(newPeerId, true);
               }
-              // Receivers don't connect to each other — only the host initiates
               break;
             }
 
             case 'signal': {
               const { peerId: senderPeerId, signalData } = data;
               if (!peersRef.current.has(senderPeerId)) {
-                // Receiver getting offer from host before peer-joined was processed
                 initiatePeerConnection(senderPeerId, false);
               }
               const ps = peersRef.current.get(senderPeerId);
@@ -692,7 +576,6 @@ export function useWebRTC(roomId: string) {
                   await ps.pc.setLocalDescription(answer);
                   signalTo(senderPeerId, { sdp: ps.pc.localDescription });
                 }
-                // Flush any ICE candidates that arrived before the remote description
                 if (ps.pendingCandidates.length > 0) {
                   const queued = ps.pendingCandidates;
                   ps.pendingCandidates = [];
@@ -702,7 +585,6 @@ export function useWebRTC(roomId: string) {
                   }
                 }
               } else if (signalData.candidate) {
-                // Only add candidates once the remote description exists; otherwise buffer them
                 if (ps.pc.remoteDescription && ps.pc.remoteDescription.type) {
                   try { await ps.pc.addIceCandidate(new RTCIceCandidate(signalData.candidate)); }
                   catch (e) { console.error('[WS] ICE candidate error:', e); }
@@ -714,7 +596,6 @@ export function useWebRTC(roomId: string) {
             }
 
             case 'peer-left': {
-              // Any peer disconnected (WebSocket closed — truly gone, not an ICE blip)
               const leftId = data.peerId as string;
               cleanupPeer(leftId);
               completedByPeerRef.current.delete(leftId);
@@ -722,7 +603,6 @@ export function useWebRTC(roomId: string) {
             }
 
             case 'host-left': {
-              // The broadcaster disconnected — session is over for all receivers
               console.log('[WS] Host left — cleaning up all connections');
               cleanupAllPeers();
               setHostId(null);
@@ -760,14 +640,13 @@ export function useWebRTC(roomId: string) {
     };
   }, [roomId, peerId, initiatePeerConnection, cleanupPeer, cleanupAllPeers, signalTo]);
 
-  // ── Public: sendFiles — fans out to all connected receivers ───────────────
+  // ── Public API ────────────────────────────────────────────────────────────
   const sendFiles = useCallback(async (files: File[]) => {
     for (const file of files) {
       const fileId = Math.random().toString(36).substring(2, 9);
       const localPreviewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
       if (localPreviewUrl) objectUrlsRef.current.add(localPreviewUrl);
 
-      // Add one UI row per file (aggregate row, not per-peer)
       setTransferQueue(prev => [...prev, {
         id: fileId, name: file.name, size: file.size,
         type: file.type || 'application/octet-stream',
@@ -777,20 +656,15 @@ export function useWebRTC(roomId: string) {
       }]);
 
       const thumb = await generateThumbnail(file);
-
-      // Record in the broadcast set so peers that connect LATER also receive it.
       const bf: BroadcastFile = { file, fileId, thumb };
       broadcastFilesRef.current.push(bf);
 
-      // Queue to every currently-open peer. Channels not yet open are handled
-      // by dc.onopen, which replays the broadcast set (no double-send: queuedFileIds).
       peersRef.current.forEach((ps, remotePeerId) => queueFileToPeer(remotePeerId, ps, bf));
     }
   }, [queueFileToPeer]);
 
   const sendFile = useCallback((file: File) => sendFiles([file]), [sendFiles]);
 
-  // ── Public: sendText ──────────────────────────────────────────────────────
   const sendText = useCallback((content: string) => {
     let sent = false;
     peersRef.current.forEach(ps => {
@@ -809,7 +683,6 @@ export function useWebRTC(roomId: string) {
     }
   }, []);
 
-  // ── Public: pauseTransfer ────────────────────────────────────────────────
   const pauseTransfer = useCallback((id: string) => {
     peersRef.current.forEach(ps => {
       const entry = [...ps.sendQueue, ps.activeSender].filter(Boolean).find(e => e?.fileId === id);
@@ -821,7 +694,6 @@ export function useWebRTC(roomId: string) {
     updateItem(id, { status: 'paused', speed: 0, eta: 0 });
   }, [updateItem]);
 
-  // ── Public: resumeTransfer ───────────────────────────────────────────────
   const resumeTransfer = useCallback((id: string, remotePeerId?: string) => {
     const targetPeers = remotePeerId
       ? [peersRef.current.get(remotePeerId)].filter(Boolean) as PeerState[]
@@ -838,7 +710,6 @@ export function useWebRTC(roomId: string) {
       }
     });
 
-    // Find which remote peer has this as activeSender to get id for runPumpForPeer
     peersRef.current.forEach((ps, pid) => {
       if (ps.sendQueue.some(e => e.fileId === id)) runPumpForPeer(pid);
     });
@@ -846,10 +717,8 @@ export function useWebRTC(roomId: string) {
     updateItem(id, { status: 'transferring' });
   }, [updateItem, runPumpForPeer]);
 
-  // ── Public: cancelTransfer ───────────────────────────────────────────────
   const cancelTransfer = useCallback((id: string) => {
-    // Sender side — cancel on all peers
-    peersRef.current.forEach((ps, _remotePeerId) => {
+    peersRef.current.forEach((ps) => {
       const entry = [...ps.sendQueue, ps.activeSender].filter(Boolean).find(e => e?.fileId === id);
       if (entry) {
         entry.cancelled = true;
@@ -859,7 +728,7 @@ export function useWebRTC(roomId: string) {
         try { ps.dc?.send(JSON.stringify({ type: 'file-cancel', id })); } catch { /* */ }
       }
     });
-    // Receiver side
+
     if (receivingRef.current?.id === id) {
       receivingRef.current = null;
       peersRef.current.forEach(ps => {
@@ -869,7 +738,6 @@ export function useWebRTC(roomId: string) {
     updateItem(id, { status: 'cancelled', speed: 0, eta: 0 });
   }, [updateItem]);
 
-  // Revoke all tracked object URLs on unmount to prevent memory leaks
   useEffect(() => {
     const urls = objectUrlsRef.current;
     return () => {
@@ -878,7 +746,6 @@ export function useWebRTC(roomId: string) {
     };
   }, []);
 
-  // Derived state
   const peerCount = connectedPeers.length;
   const isConnectedState: typeof connectionState = peerCount > 0
     ? 'connected'

@@ -22,7 +22,13 @@ export function JoinForm({ inputCode, setInputCode, handleJoinCode }: JoinFormPr
           inputMode="numeric"
           placeholder="enter 6-digit key"
           value={inputCode}
-          onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))}
+          onChange={(e) => {
+            let val = e.target.value;
+            if (val.includes('#')) {
+              val = val.split('#').pop() || val;
+            }
+            setInputCode(val.replace(/\D/g, '').slice(0, 6));
+          }}
           className="bg-black/30 border border-white/10 rounded-full w-full sm:flex-grow h-12 sm:h-11 px-5 text-base sm:text-sm text-center font-mono text-white placeholder-text-secondary/40 outline-none focus:border-white/30 focus:bg-black/50 transition-colors"
         />
         <button

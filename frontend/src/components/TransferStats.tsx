@@ -18,7 +18,6 @@ export function TransferStats({ queue, cancelTransfer, pauseTransfer, resumeTran
   const totalSpeed     = queue.filter(i => i.status === 'transferring').reduce((s, i) => s + i.speed, 0);
   const completedCount = queue.filter(i => i.status === 'completed').length;
 
-  // BUG-8 fix: pre-compute queue positions in O(n) instead of O(n²) queue.indexOf
   const queuePosMap = new Map<string, number>();
   let posCounter = 0;
   queue.forEach(item => {

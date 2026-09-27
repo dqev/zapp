@@ -106,8 +106,10 @@ function App() {
     const fileArray = Array.from(files);
     setPendingFiles(fileArray);
 
-    // Generate a 6-digit numeric room ID code and set hash
-    const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate a cryptographically secure 6-digit numeric room ID code and set hash
+    const array = new Uint32Array(1);
+    crypto.getRandomValues(array);
+    const randomCode = (100000 + (array[0] % 900000)).toString();
     window.location.hash = randomCode;
   };
 

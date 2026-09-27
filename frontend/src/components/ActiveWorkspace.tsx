@@ -92,9 +92,17 @@ export function ActiveWorkspace({
     });
   }, [pendingFiles]);
 
-  // Recipient send-back input
+  // File inputs for sending files
   const recipientFileInputRef = useRef<HTMLInputElement>(null);
+  const hostFileInputRef = useRef<HTMLInputElement>(null);
+
   const handleRecipientFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    sendFiles(Array.from(e.target.files));
+    e.target.value = '';
+  }, [sendFiles]);
+
+  const handleHostFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     sendFiles(Array.from(e.target.files));
     e.target.value = '';
@@ -308,6 +316,26 @@ export function ActiveWorkspace({
               <p className="text-[10px] text-text-secondary/50 mt-4 leading-relaxed">
                 Waiting for peer to connect… transfer starts automatically.
               </p>
+            )}
+
+            {/* Host add more files button */}
+            {isHost && (
+              <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                <input
+                  ref={hostFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleHostFileChange}
+                />
+                <button
+                  onClick={() => hostFileInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-full text-[11px] font-semibold text-text-secondary hover:text-text-primary bg-white/5 hover:bg-white/10 border border-white/10 transition-all duration-200 active:scale-95"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add files to broadcast
+                </button>
+              </div>
             )}
           </div>
         ) : (
