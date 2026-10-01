@@ -1,20 +1,30 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FlashSlash2 } from 'reicon-react';
+import { navigate } from '../utils/navigate';
 
 export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
+  const [path, setPath] = useState(() => window.location.pathname);
 
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
     };
+    const handleRoute = () => setPath(window.location.pathname);
     window.addEventListener('scroll', handleScroll);
+    window.addEventListener('popstate', handleRoute);
     handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('popstate', handleRoute);
+    };
   }, []);
 
+  const isTextPage = path.startsWith('/text');
+
   const triggerReset = () => {
+    // Stay on the same page (/ or /text), just leave the room
     window.location.hash = '';
   };
 
@@ -43,6 +53,26 @@ export function Header() {
             </div>
           </div>
  
+          {/* Center page nav */}
+          <nav className="hidden sm:flex items-center gap-1 p-1 rounded-full bg-black/40 border border-white/10">
+            <button
+              onClick={() => navigate('/')}
+              className={`px-4 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all active:scale-95 ${
+                !isTextPage ? 'bg-white text-black shadow' : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Files
+            </button>
+            <button
+              onClick={() => navigate('/text')}
+              className={`px-4 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all active:scale-95 ${
+                isTextPage ? 'bg-white text-black shadow' : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Text
+            </button>
+          </nav>
+
           {/* Right Navigation CTAs */}
           <div className="flex items-center gap-1">
             <a 

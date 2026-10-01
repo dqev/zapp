@@ -153,6 +153,18 @@ body {
   transform: translateY(2px);
 }
 
+/* VS-style code editor textarea */
+.code-editor-textarea {
+  caret-color: #fff;
+  tab-size: 2;
+}
+.code-editor-textarea::selection {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+.code-editor-textarea:focus {
+  outline: none;
+}
+
 /* Ambient glow nodes background */
 .ambient-glow {
   filter: blur(120px) saturate(1.2);

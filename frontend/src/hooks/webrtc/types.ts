@@ -27,6 +27,7 @@ export const BUFFER_HIGH_WATERMARK = 8 * 1024 * 1024;  // 8 MB — keep the SCTP
 export const BUFFER_LOW_WATERMARK  = 1 * 1024 * 1024;  // 1 MB
 export const STATS_INTERVAL_MS     = 300;
 export const MAX_ICE_RESTARTS      = 3;
+export const TEXT_CHUNK_SIZE       = 16384;            // 16 KB — keeps each text DataChannel message well under SCTP limits
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 export interface SenderEntry {

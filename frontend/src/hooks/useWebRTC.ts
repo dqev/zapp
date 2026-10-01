@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   CHUNK_SIZE, BUFFER_HIGH_WATERMARK,
-  BUFFER_LOW_WATERMARK, STATS_INTERVAL_MS, MAX_ICE_RESTARTS
+  BUFFER_LOW_WATERMARK, STATS_INTERVAL_MS, MAX_ICE_RESTARTS,
+  TEXT_CHUNK_SIZE
 } from './webrtc/types';
 import type {
   TransferItem, TextMessage,
@@ -43,6 +44,13 @@ export function useWebRTC(roomId: string) {
   // Per-peer set of fileIds that peer has FULLY received (survives reconnects)
   const completedByPeerRef = useRef<Map<string, Set<string>>>(new Map());
 
+  // Text reassembly buffers: messageId -> { chunks, totalChunks }
+  // Lets large formatted texts arrive intact (exact whitespace / newlines preserved)
+  const incomingTextRef = useRef<Map<string, { chunks: string[]; totalChunks: number }>>(new Map());
+
+  // Texts this node is broadcasting — replayed to late joiners (mirrors broadcastFilesRef)
+  const broadcastTextsRef = useRef<{ id: string; content: string }[]>([]);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const updateItem = useCallback((id: string, patch: Partial<TransferItem>) => {
     setTransferQueue(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
@@ -53,6 +61,24 @@ export function useWebRTC(roomId: string) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'signal', roomId, peerId, targetId, signalData }));
   }, [roomId, peerId]);
+
+  // ── Chunked text transmit — content sent verbatim (no trim / no reformat) ──
+  // Small texts go as one 'text' message; large ones as start/chunk/end so they
+  // never exceed SCTP message limits and reassemble byte-identical.
+  function transmitText(dc: RTCDataChannel, messageId: string, content: string) {
+    if (dc.readyState !== 'open') return;
+    if (content.length <= TEXT_CHUNK_SIZE) {
+      dc.send(JSON.stringify({ type: 'text', id: messageId, content }));
+      return;
+    }
+    const totalChunks = Math.ceil(content.length / TEXT_CHUNK_SIZE);
+    dc.send(JSON.stringify({ type: 'text-start', id: messageId, totalChunks, totalLength: content.length }));
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = content.slice(i * TEXT_CHUNK_SIZE, (i + 1) * TEXT_CHUNK_SIZE);
+      dc.send(JSON.stringify({ type: 'text-chunk', id: messageId, index: i, chunk }));
+    }
+    dc.send(JSON.stringify({ type: 'text-end', id: messageId }));
+  }
 
   // ── Send pump — runs independently per peer ───────────────────────────────
   const runPumpForPeer = useCallback(async (remotePeerId: string) => {
@@ -229,6 +255,8 @@ export function useWebRTC(roomId: string) {
       setConnectedPeers(prev => prev.includes(remotePeerId) ? prev : [...prev, remotePeerId]);
       setConnectionState('connected');
       broadcastFilesRef.current.forEach(bf => queueFileToPeer(remotePeerId, ps, bf));
+      // Replay broadcast texts to late joiners — exact content preserved
+      broadcastTextsRef.current.forEach(t => transmitText(dc, t.id, t.content));
       if (ps.sendQueue.length > 0) runPumpForPeer(remotePeerId);
     };
 
@@ -259,6 +287,9 @@ export function useWebRTC(roomId: string) {
   // ── Incoming message router ───────────────────────────────────────────────
   const dispatchRef = useRef<{
     onText: (msg: { id: string; content: string }) => void;
+    onTextStart: (msg: { id: string; totalChunks: number }) => void;
+    onTextChunk: (msg: { id: string; index: number; chunk: string }) => void;
+    onTextEnd: (msg: { id: string }) => void;
     onFileMetadata: (msg: { id: string; name: string; size: number; fileType: string; preview?: string }) => void;
     onFileEnd: (id: string) => void;
     onFileError: (id: string) => void;
@@ -266,6 +297,9 @@ export function useWebRTC(roomId: string) {
     onBinaryChunk: (data: ArrayBuffer) => void;
   }>({
     onText: () => {},
+    onTextStart: () => {},
+    onTextChunk: () => {},
+    onTextEnd: () => {},
     onFileMetadata: () => {},
     onFileEnd: () => {},
     onFileError: () => {},
@@ -274,12 +308,38 @@ export function useWebRTC(roomId: string) {
   });
 
   useEffect(() => {
+    const pushPeerText = (id: string, content: string) => {
+      setTextMessages(prev => {
+        if (prev.some(m => m.id === id)) return prev;
+        return [...prev, {
+          id, sender: 'peer', content,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }];
+      });
+    };
     dispatchRef.current = {
       onText: (msg) => {
-        setTextMessages(prev => [...prev, {
-          id: msg.id, sender: 'peer', content: msg.content,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }]);
+        pushPeerText(msg.id, msg.content);
+      },
+      onTextStart: (msg) => {
+        incomingTextRef.current.set(msg.id, {
+          chunks: new Array(msg.totalChunks).fill(''),
+          totalChunks: msg.totalChunks
+        });
+      },
+      onTextChunk: (msg) => {
+        const buf = incomingTextRef.current.get(msg.id);
+        if (!buf) return;
+        if (msg.index >= 0 && msg.index < buf.totalChunks) {
+          buf.chunks[msg.index] = msg.chunk ?? '';
+        }
+      },
+      onTextEnd: (msg) => {
+        const buf = incomingTextRef.current.get(msg.id);
+        incomingTextRef.current.delete(msg.id);
+        if (!buf) return;
+        // join in order — verbatim, no trimming
+        pushPeerText(msg.id, buf.chunks.join(''));
       },
       onFileMetadata: (msg) => {
         receivingRef.current = {
@@ -376,6 +436,9 @@ export function useWebRTC(roomId: string) {
         const msg = JSON.parse(event.data);
         switch (msg.type) {
           case 'text':          dispatchRef.current.onText(msg); break;
+          case 'text-start':    dispatchRef.current.onTextStart(msg); break;
+          case 'text-chunk':    dispatchRef.current.onTextChunk(msg); break;
+          case 'text-end':      dispatchRef.current.onTextEnd(msg); break;
           case 'file-metadata': dispatchRef.current.onFileMetadata(msg); break;
           case 'file-end':      dispatchRef.current.onFileEnd(msg.id); break;
           case 'file-error':    dispatchRef.current.onFileError(msg.id); break;
@@ -414,6 +477,7 @@ export function useWebRTC(roomId: string) {
     setConnectedPeers([]);
     receivingRef.current = null;
     completedByPeerRef.current.clear();
+    incomingTextRef.current.clear();
   }, [cleanupPeer]);
 
   // ── Initiate connection ───────────────────────────────────────────────────
@@ -666,21 +730,33 @@ export function useWebRTC(roomId: string) {
   const sendFile = useCallback((file: File) => sendFiles([file]), [sendFiles]);
 
   const sendText = useCallback((content: string) => {
+    // Preserve exact formatting — do NOT trim. Empty-only strings still send
+    // if caller allows, but guard against truly empty payloads here.
+    if (!content || content.length === 0) return;
+    const messageId = Math.random().toString(36).substring(2, 9);
     let sent = false;
     peersRef.current.forEach(ps => {
       if (ps.dc && ps.dc.readyState === 'open') {
-        const messageId = Math.random().toString(36).substring(2, 9);
-        ps.dc.send(JSON.stringify({ type: 'text', id: messageId, content }));
-        sent = true;
+        try {
+          transmitText(ps.dc, messageId, content);
+          sent = true;
+        } catch (err) {
+          console.error('[DC] sendText failed:', err);
+        }
       }
     });
-    if (sent) {
-      setTextMessages(prev => [...prev, {
-        id: Math.random().toString(36).substring(2, 9),
-        sender: 'self', content,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }]);
+    // Remember for late joiners (same semantics as broadcastFilesRef)
+    broadcastTextsRef.current.push({ id: messageId, content });
+    if (sent || peersRef.current.size === 0) {
+      setTextMessages(prev => {
+        if (prev.some(m => m.id === messageId)) return prev;
+        return [...prev, {
+          id: messageId, sender: 'self', content,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }];
+      });
     }
+    return messageId;
   }, []);
 
   const pauseTransfer = useCallback((id: string) => {
